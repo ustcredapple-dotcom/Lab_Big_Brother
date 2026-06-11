@@ -23,6 +23,7 @@ DENIED_EXACT = {
 }
 DENIED_PREFIXES = (
     "Document/",
+    "Key/",
     "AI_Agent/Lab_Memory_Agent/indices/",
     "AI_Agent/Lab_Memory_Agent/logs/",
 )

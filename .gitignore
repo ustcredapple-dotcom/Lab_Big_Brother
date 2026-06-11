@@ -10,6 +10,7 @@ Thumbs.db
 # The GitHub repository is public. Keep the complete NAS handoff private.
 PROJECT_HANDOFF.md
 Document/
+Key/
 
 # Local credentials and sync state
 AI_Agent/Lab_Memory_Agent/config/*
@@ -33,4 +34,3 @@ AI_Agent/Lab_Memory_Agent/entries/*
 *.one
 *.onepkg
 *.onetoc2
-

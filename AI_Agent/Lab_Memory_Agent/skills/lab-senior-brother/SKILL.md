@@ -90,3 +90,22 @@ python /Volumes/ZZLab_AI/AI_Agent/Lab_Memory_Agent/scripts/notebook_pipeline/dai
 ```
 
 It can merge a fresh incoming HTML export into the active HTML tree first, skipping duplicate pages so the notebook is not stored twice. It then compares the active HTML notebook against the previous snapshot, writes timestamped change logs, and sends only added or modified pages to DeepSeek before merging the refreshed page records into the distilled index. Use `--no-deepseek` only for baseline seeding or dry verification.
+
+## Telegram Interface
+
+Telegram can be used as a lightweight query and note-capture entrypoint:
+
+```bash
+python /Volumes/ZZLab_AI/AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/telegram_lab_senior_brother.py
+```
+
+The BotFather token must stay private at `/Volumes/ZZLab_AI/Key/telegram_bot_token.txt`. The private config lives at `/Volumes/ZZLab_AI/Document/Lab_Notebook_Processing/telegram_bot_config.json`.
+
+Supported commands:
+
+- `/id`: return the current chat ID for allow-list setup
+- `/ask QUESTION` or `查 QUESTION`: query the lab notebook
+- `/note TEXT` or `记 TEXT`: write a Telegram note into the private inbox
+- `/status`, `/help`
+
+Do not enable notebook query or note write access for unknown chat IDs.

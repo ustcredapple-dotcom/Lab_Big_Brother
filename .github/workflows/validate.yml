@@ -1,0 +1,25 @@
+name: Validate
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile Python scripts
+        run: python -m compileall -q AI_Agent/Lab_Memory_Agent
+      - name: Rebuild and search example memory
+        working-directory: AI_Agent/Lab_Memory_Agent
+        run: |
+          python scripts/rebuild_index.py
+          python scripts/search_memory.py "memory framework"
+

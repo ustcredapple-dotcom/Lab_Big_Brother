@@ -1,0 +1,13 @@
+{
+  "tenant_id": "PASTE_TENANT_ID_HERE",
+  "client_id": "PASTE_APP_CLIENT_ID_HERE",
+  "notebook_name": "ZZLab Notebook",
+  "scopes": [
+    "User.Read",
+    "Notes.Read",
+    "offline_access"
+  ],
+  "graph_root": "https://graph.microsoft.com/v1.0",
+  "sync_root": "sources/onenote_graph",
+  "entry_tag": "onenote-graph-sync"
+}

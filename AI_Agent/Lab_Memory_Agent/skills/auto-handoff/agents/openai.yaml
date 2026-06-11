@@ -1,0 +1,4 @@
+interface:
+  display_name: "Auto Handoff"
+  short_description: "Keep the ZZLab project handoff current and readable"
+  default_prompt: "Update the ZZLab current handoff and append a concise work-log entry for this session."

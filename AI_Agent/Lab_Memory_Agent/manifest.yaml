@@ -1,0 +1,53 @@
+name: lab-memory-pack
+version: 0.1.0
+description: Portable AI-readable memory pack for lab work, documents, decisions, and experiments.
+owner: replace-with-owner
+created: 2026-06-11
+
+paths:
+  inbox: inbox
+  sources: sources
+  entries: entries
+  indices: indices
+  schemas: schemas
+  skill: skills/lab-memory/SKILL.md
+
+handoff:
+  current: ../../PROJECT_HANDOFF.md
+  log: ../../Document/AI_Agent_Migration_2026-06-11/conversation_records/WORK_LOG.md
+  skill: skills/auto-handoff/SKILL.md
+  update_after_significant_work: true
+
+github:
+  repository: https://github.com/ustcredapple-dotcom/Lab_Big_Brother
+  branch: main
+  visibility: public
+  sync_after_handoff: true
+  private_data_excluded: true
+
+entry_schema: schemas/memory_entry.schema.json
+
+policies:
+  require_source_refs: true
+  preserve_superseded_entries: true
+  default_confidence: medium
+  answer_requires_citations: true
+  sensitive_data_allowed: false
+  maintain_project_handoff: true
+
+memory_types:
+  - notebook_page
+  - document
+  - experiment
+  - protocol
+  - result
+  - decision
+  - meeting
+  - dataset
+  - code
+  - instrument
+  - idea
+  - hypothesis
+
+index_files:
+  - indices/memory_index.jsonl

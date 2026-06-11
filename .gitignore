@@ -1,0 +1,36 @@
+# Operating-system and generated files
+.DS_Store
+Thumbs.db
+**/__pycache__/
+*.py[cod]
+*.tmp
+*.log
+#recycle/
+
+# The GitHub repository is public. Keep the complete NAS handoff private.
+PROJECT_HANDOFF.md
+Document/
+
+# Local credentials and sync state
+AI_Agent/Lab_Memory_Agent/config/*
+!AI_Agent/Lab_Memory_Agent/config/onenote_sync.example.json
+AI_Agent/Lab_Memory_Agent/indices/
+AI_Agent/Lab_Memory_Agent/logs/
+
+# Imported laboratory material is private by default.
+AI_Agent/Lab_Memory_Agent/inbox/*
+!AI_Agent/Lab_Memory_Agent/inbox/README.md
+AI_Agent/Lab_Memory_Agent/sources/*
+!AI_Agent/Lab_Memory_Agent/sources/example-source.md
+AI_Agent/Lab_Memory_Agent/entries/*
+!AI_Agent/Lab_Memory_Agent/entries/2026-06-11-example.md
+!AI_Agent/Lab_Memory_Agent/entries/2026-06-11-auto-work-handoff.md
+
+# OneNote exports and recovery packages must never be public by default.
+**/onenote_graph/
+**/notebook_raw/
+**/notebook_exports/
+*.one
+*.onepkg
+*.onetoc2
+

@@ -6,6 +6,7 @@ import json
 import re
 import shutil
 import subprocess
+import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
@@ -75,6 +76,7 @@ def default_config() -> dict[str, Any]:
         "query_timeout_seconds": 60,
         "allow_registration_mode": True,
         "send_html_details": True,
+        "persistent_record_kinds": ["note", "file", "mode", "admin"],
     }
 
 
@@ -232,6 +234,9 @@ def daily_person_dir(chat_id: int, user: dict[str, Any], config: dict[str, Any],
 
 
 def append_chat_record(chat_id: int, user: dict[str, Any], message: dict[str, Any], config: dict[str, Any], kind: str, text: str = "", files: list[dict[str, Any]] | None = None) -> None:
+    persistent_kinds = set(config.get("persistent_record_kinds") or default_config()["persistent_record_kinds"])
+    if kind not in persistent_kinds:
+        return
     now = datetime.now().astimezone()
     folder = daily_person_dir(chat_id, user, config, now)
     record = {
@@ -544,6 +549,15 @@ def has_clear_notebook_evidence(result: dict[str, Any]) -> bool:
     if str(result.get("confidence", "low")) == "low":
         return False
     return float(result.get("top_score") or 0) >= 8.0
+
+
+def send_query_detail_if_needed(token: str, chat_id: int, question: str, result: dict[str, Any], config: dict[str, Any]) -> None:
+    if not config.get("send_html_details", True) or not has_clear_notebook_evidence(result):
+        return
+    with tempfile.TemporaryDirectory(prefix="zzlab_query_html_") as temporary:
+        detail_path = Path(temporary) / f"{safe_name(question, 'query')}.html"
+        render_query_html(question, result, detail_path)
+        send_document(token, chat_id, detail_path, "查询详情 HTML")
 
 
 def build_file_index(config: dict[str, Any]) -> list[dict[str, Any]]:
@@ -871,6 +885,53 @@ def casual_chat_reply(text: str) -> str:
     return "你好，我在。大师兄已就位。\n你要查实验室记忆、采购记录、参数、谁做过什么，直接问就行。"
 
 
+def looks_like_lab_query(text: str) -> bool:
+    lowered = text.casefold()
+    query_markers = (
+        "几台",
+        "几个",
+        "几张",
+        "多少",
+        "参数",
+        "型号",
+        "价格",
+        "报价",
+        "买过",
+        "采购",
+        "做过",
+        "测过",
+        "怎么测",
+        "怎么用",
+        "怎么做",
+        "谁",
+        "什么时候",
+        "记录",
+        "notebook",
+        "电脑",
+        "dds",
+        "真空",
+        "烘烤",
+        "光学平台",
+        "实验室",
+        "lab",
+    )
+    return any(marker in lowered for marker in query_markers)
+
+
+def note_request_body(text: str) -> str | None:
+    stripped = text.strip()
+    patterns = (
+        r"^(?:大师兄[，, ]*)?(?:帮我)?(?:记一下|记录一下|保存一下|记住|记录|保存)\s*(.+)$",
+        r"^(?:please\s+)?(?:note|remember|record)\s+(.+)$",
+    )
+    for pattern in patterns:
+        match = re.match(pattern, stripped, flags=re.IGNORECASE)
+        if match:
+            body = match.group(1).strip()
+            return body or None
+    return None
+
+
 def extract_chat_id(text: str) -> int | None:
     matches = re.findall(r"(?<!\d)(\d{6,15})(?!\d)", text)
     if not matches:
@@ -887,6 +948,13 @@ def is_allowlist_request(text: str) -> bool:
 
 
 def deepseek_agent_route(text: str, mode: str, config: dict[str, Any]) -> dict[str, Any]:
+    note_body = note_request_body(text)
+    if note_body:
+        return {"action": "note", "body": note_body, "target_chat_id": None, "reply": "", "reason": "local note-request guard"}
+    if looks_like_file_request(text):
+        return {"action": "find_file", "body": text, "target_chat_id": None, "reply": "", "reason": "local file-request guard"}
+    if looks_like_lab_query(text):
+        return {"action": "query_notebook", "body": text, "target_chat_id": None, "reply": "", "reason": "local lab-query guard"}
     tools = [
         {
             "action": "query_notebook",
@@ -925,6 +993,7 @@ def deepseek_agent_route(text: str, mode: str, config: dict[str, Any]) -> dict[s
                 "你的任务不是回答内容，而是从白名单工具中选择一个动作并抽取参数。"
                 "只能选择给定 action；不要发明工具；不要选择任意 shell 或未列出的文件操作。"
                 "如果是实验室事实问题，选 query_notebook。"
+                "凡是问数量、参数、价格、型号、采购、做没做过、怎么测、怎么做、谁负责、什么时候，必须选 query_notebook，不要选 chat。"
                 "如果是管理白名单，选 allow_chat_id。"
                 "如果是一般寒暄，选 chat，并写一句自然简短的 reply。"
                 "如果用户要求你现在做但没有对应安全工具，选 unsupported，并说明 Telegram 端还没接这个工具。"
@@ -995,10 +1064,13 @@ def parse_command(text: str) -> tuple[str, str]:
         return "allow", str(target) if target is not None else ""
     if is_casual_chat(stripped):
         return "chat", stripped
+    note_body = note_request_body(stripped)
+    if note_body:
+        return "note", note_body
     if stripped.startswith("查"):
         return "ask", stripped[1:].strip()
-    if stripped.startswith("记"):
-        return "note", stripped[1:].strip()
+    if re.match(r"^记(?:\s|[：:，,])", stripped):
+        return "note", re.sub(r"^记[\s：:，,]*", "", stripped).strip()
     return "agent", stripped
 
 
@@ -1106,11 +1178,8 @@ def handle_message(token: str, message: dict[str, Any], config: dict[str, Any], 
                 return
             append_chat_record(chat_id, user, message, config, "query", route_body, saved_files)
             result = query_notebook(route_body, config)
-            detail_path = daily_person_dir(chat_id, user, config) / "query_html" / f"{datetime.now().astimezone().strftime('%H%M%S')}_{safe_name(route_body, 'query')}.html"
-            render_query_html(route_body, result, detail_path)
             send_message(token, chat_id, short_query_reply(route_body, result))
-            if config.get("send_html_details", True) and has_clear_notebook_evidence(result):
-                send_document(token, chat_id, detail_path, "查询详情 HTML")
+            send_query_detail_if_needed(token, chat_id, route_body, result, config)
         else:
             reply = str(route.get("reply") or "这个动作我还没接到 Telegram 工具里。现在我能查 notebook、记笔记、找归档文件、加白名单。")
             append_chat_record(chat_id, user, message, config, "unsupported", display_text, saved_files)
@@ -1159,11 +1228,8 @@ def handle_message(token: str, message: dict[str, Any], config: dict[str, Any], 
                 return
         append_chat_record(chat_id, user, message, config, "query", body, saved_files)
         result = query_notebook(body, config)
-        detail_path = daily_person_dir(chat_id, user, config) / "query_html" / f"{datetime.now().astimezone().strftime('%H%M%S')}_{safe_name(body, 'query')}.html"
-        render_query_html(body, result, detail_path)
         send_message(token, chat_id, short_query_reply(body, result))
-        if config.get("send_html_details", True) and has_clear_notebook_evidence(result):
-            send_document(token, chat_id, detail_path, "查询详情 HTML")
+        send_query_detail_if_needed(token, chat_id, body, result, config)
 
 
 def poll(token: str, config_path: Path, offset_path: Path, state_path: Path, once: bool = False) -> None:

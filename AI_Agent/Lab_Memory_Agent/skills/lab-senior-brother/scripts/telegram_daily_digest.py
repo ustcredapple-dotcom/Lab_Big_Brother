@@ -14,6 +14,7 @@ DISTILLATION = PROCESSING / "html_deepseek_distilled/DEEPSEEK_DISTILLATION.json"
 DISTILLATION_HTML = PROCESSING / "html_deepseek_distilled/DEEPSEEK_DISTILLATION.html"
 DEFAULT_FOLDER_NAME = "telegram文件和聊天记录"
 DEEPSEEK_KEY = ZZLAB_ROOT / "Key/Deepseek Key.txt"
+MEMORY_KINDS = {"note", "file"}
 
 SCRIPT_DIR = Path(__file__).resolve().parents[3] / "scripts/notebook_pipeline"
 
@@ -272,11 +273,12 @@ def main() -> None:
     root = args.root / day.isoformat() / args.folder_name
     output = root / f"telegram_records_{day.isoformat()}.html"
     records = load_records(root) if root.exists() else []
+    memory_records = [item for item in records if item.get("kind") in MEMORY_KINDS]
     render_html(day, root, records, output)
-    distilled = deepseek_distill(day, records, read_text_extracts(records))
-    if records:
-        upsert_distillation(day, output, records, distilled)
-    print(json.dumps({"date": day.isoformat(), "records": len(records), "html": str(output), "distilled": bool(records)}, ensure_ascii=False))
+    distilled = deepseek_distill(day, memory_records, read_text_extracts(memory_records))
+    if memory_records:
+        upsert_distillation(day, output, memory_records, distilled)
+    print(json.dumps({"date": day.isoformat(), "records": len(records), "memory_records": len(memory_records), "html": str(output), "distilled": bool(memory_records)}, ensure_ascii=False))
 
 
 if __name__ == "__main__":

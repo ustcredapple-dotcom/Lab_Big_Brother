@@ -12,6 +12,7 @@ The notebook workflow is HTML-first:
 4. Generate `HTML_INDEX.html` and `HTML_MANIFEST.json` with `build_html_notebook_index.py`.
 5. Let humans and AI agents read the HTML directly.
 6. Optionally generate a local distilled overview with `distill_html_locally.py`.
+7. With project-owner approval, generate a DeepSeek distilled overview with `distill_html_with_deepseek.py`.
 
 ## Script
 
@@ -33,12 +34,23 @@ python distill_html_locally.py \
   --output-dir /Volumes/ZZLab_AI/Document/Lab_Notebook_Processing/html_distilled
 ```
 
+Generate or refresh the DeepSeek distillation:
+
+```bash
+python distill_html_with_deepseek.py \
+  --html-root /Volumes/ZZLab_AI/Document/Lab_Notebook_Processing/html/active/Lab_Notebook_Original_2026-06-11 \
+  --manifest /Volumes/ZZLab_AI/Document/Lab_Notebook_Processing/html/active/HTML_MANIFEST.json \
+  --output-dir /Volumes/ZZLab_AI/Document/Lab_Notebook_Processing/html_deepseek_distilled
+```
+
 ## Outputs
 
 - `HTML_INDEX.html`: human- and AI-friendly page index with links and previews.
 - `HTML_MANIFEST.json`: machine-readable metadata for sections, pages, timestamps, source IDs, hashes, and text previews.
 - `html_distilled/LOCAL_DISTILLATION.html`: local condensed overview generated without external API calls.
 - `html_distilled/LOCAL_DISTILLATION.json`: machine-readable local distillation.
+- `html_deepseek_distilled/DEEPSEEK_DISTILLATION.html`: DeepSeek-generated notebook digest.
+- `html_deepseek_distilled/DEEPSEEK_DISTILLATION.json`: machine-readable DeepSeek distillation with page, section, and notebook summaries.
 
 ## Safety Rules
 
@@ -46,4 +58,4 @@ python distill_html_locally.py \
 - Do not copy credentials or notebook-sharing secrets into code, docs, HTML, logs, or GitHub.
 - Keep private notebook content and generated HTML out of the public repository.
 - Preserve relative links inside the HTML tree so attachments remain readable.
-- Keep distillation local unless the project owner explicitly approves and the execution environment allows external disclosure.
+- Send notebook content to external APIs only with explicit project-owner approval.

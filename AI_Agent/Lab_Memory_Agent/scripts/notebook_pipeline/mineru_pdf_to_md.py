@@ -16,6 +16,7 @@ from pathlib import Path
 DEFAULT_TOKEN_CANDIDATES = (
     "MinerU Key.txt",
     "MinerU Token.txt",
+    "MinerU token.txt",
     "mineru_token.txt",
 )
 

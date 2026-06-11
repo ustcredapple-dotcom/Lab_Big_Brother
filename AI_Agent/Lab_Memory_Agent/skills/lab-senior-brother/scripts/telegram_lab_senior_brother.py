@@ -6,7 +6,6 @@ import json
 import re
 import shutil
 import subprocess
-import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -20,7 +19,9 @@ DEFAULT_OFFSET = ZZLAB_ROOT / "Document/Lab_Notebook_Processing/telegram_bot_off
 DEFAULT_STATE = ZZLAB_ROOT / "Document/Lab_Notebook_Processing/telegram_bot_state.json"
 DEFAULT_INBOX = ZZLAB_ROOT / "AI_Agent/Lab_Memory_Agent/inbox/telegram"
 DEFAULT_DAILY_ROOT = ZZLAB_ROOT
-QUERY_SCRIPT = ZZLAB_ROOT / "AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/query_lab_notebook.py"
+DEFAULT_DISTILLATION = ZZLAB_ROOT / "Document/Lab_Notebook_Processing/html_deepseek_distilled/DEEPSEEK_DISTILLATION.json"
+DEFAULT_HTML_ROOT = ZZLAB_ROOT / "Document/Lab_Notebook_Processing/html/active/Lab_Notebook_Original_2026-06-11"
+DEFAULT_DEEPSEEK_KEY = ZZLAB_ROOT / "Key/Deepseek Key.txt"
 
 
 HELP_TEXT = """实验室大师兄 Telegram 入口
@@ -107,6 +108,53 @@ def telegram_request(token: str, method: str, payload: dict[str, Any] | None = N
     if not result.get("ok"):
         raise RuntimeError(f"Telegram API {method} returned not ok: {json.dumps(result, ensure_ascii=False)}")
     return result
+
+
+def read_deepseek_key(path: Path = DEFAULT_DEEPSEEK_KEY) -> str:
+    raw = path.read_text(encoding="utf-8").strip()
+    parts = raw.replace("：", ":").replace("=", " ").replace(":", " ").split()
+    for part in parts:
+        if part.startswith("sk-"):
+            return part
+    if raw.startswith("sk-"):
+        return raw
+    raise RuntimeError(f"No DeepSeek sk-token found in {path}")
+
+
+def deepseek_json(messages: list[dict[str, str]], model: str = "deepseek-chat", timeout: int = 120) -> tuple[dict[str, Any], dict[str, Any]]:
+    payload = {
+        "model": model,
+        "messages": messages,
+        "response_format": {"type": "json_object"},
+        "temperature": 0.1,
+        "stream": False,
+    }
+    completed = subprocess.run(
+        [
+            "curl",
+            "-sS",
+            "https://api.deepseek.com/chat/completions",
+            "-H",
+            f"Authorization: Bearer {read_deepseek_key()}",
+            "-H",
+            "Content-Type: application/json",
+            "-d",
+            json.dumps(payload, ensure_ascii=False),
+        ],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=timeout,
+    )
+    if completed.returncode:
+        detail = completed.stderr.strip() or completed.stdout.strip() or f"curl exited {completed.returncode}"
+        raise RuntimeError(f"DeepSeek request failed: {detail}")
+    data = json.loads(completed.stdout)
+    if data.get("error"):
+        raise RuntimeError(json.dumps(data["error"], ensure_ascii=False))
+    content = data["choices"][0]["message"]["content"]
+    return json.loads(content), data.get("usage", {})
 
 
 def send_message(token: str, chat_id: int, text: str) -> None:
@@ -213,28 +261,191 @@ def get_chat_mode(state: dict[str, Any], chat_id: int) -> str:
     return str(state.get("chats", {}).get(str(chat_id), {}).get("mode", "ask"))
 
 
+def load_distilled_pages(path: Path = DEFAULT_DISTILLATION) -> list[dict[str, Any]]:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    pages: list[dict[str, Any]] = []
+    for section in data.get("sections", []):
+        section_name = section.get("section", "")
+        for page in section.get("pages", []):
+            item = dict(page)
+            item.setdefault("section", section_name)
+            pages.append(item)
+    return pages
+
+
+def compact_distilled_directory(pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    directory = []
+    for index, page in enumerate(pages, start=1):
+        distilled = page.get("distilled", {})
+        directory.append(
+            {
+                "id": index,
+                "section": page.get("section", ""),
+                "title": page.get("title", ""),
+                "summary": distilled.get("one_sentence_summary", ""),
+                "tags": distilled.get("tags", [])[:8],
+                "people_organizations_equipment": distilled.get("people_organizations_equipment", [])[:8],
+            }
+        )
+    return directory
+
+
+def source_snippet_for(page: dict[str, Any], limit: int = 900) -> str:
+    html_rel = page.get("html", "")
+    source = DEFAULT_HTML_ROOT / html_rel
+    if not source.is_file():
+        return ""
+    text = re.sub(r"\s+", " ", source.read_text(encoding="utf-8", errors="replace"))
+    return text[:limit]
+
+
+def evidence_from_page(page: dict[str, Any], evidence_id: int) -> dict[str, Any]:
+    distilled = page.get("distilled", {})
+    return {
+        "id": evidence_id,
+        "score": 100 - evidence_id,
+        "section": page.get("section", ""),
+        "title": page.get("title", ""),
+        "html": str(DEFAULT_HTML_ROOT / page.get("html", "")),
+        "source_sha256": page.get("source_sha256", ""),
+        "summary": distilled.get("one_sentence_summary", ""),
+        "what_happened": distilled.get("what_happened", []),
+        "important_facts": distilled.get("important_facts", []),
+        "decisions_or_conclusions": distilled.get("decisions_or_conclusions", []),
+        "open_questions_or_next_steps": distilled.get("open_questions_or_next_steps", []),
+        "people_organizations_equipment": distilled.get("people_organizations_equipment", []),
+        "tags": distilled.get("tags", []),
+        "attachments": page.get("attachments", [])[:10],
+        "source_snippet": source_snippet_for(page),
+    }
+
+
+def deepseek_select_evidence(question: str, pages: list[dict[str, Any]], config: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    directory = compact_distilled_directory(pages)
+    max_evidence = max(1, min(int(config.get("default_top_k", 5)), 8))
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "你是实验室 notebook 的检索员。你只根据给出的蒸馏目录选择证据页。"
+                "如果目录里没有直接回答用户问题的页面，必须说没有。"
+                "不要因为单个泛词或同音字相似就选择页面，比如“电脑”和“电气/光学平台/温控”不是同一件事。"
+                "只输出 JSON。"
+            ),
+        },
+        {
+            "role": "user",
+            "content": json.dumps(
+                {
+                    "question": question,
+                    "max_evidence": max_evidence,
+                    "output_schema": {
+                        "has_answer": "boolean",
+                        "selected_ids": ["page id integers, empty if no direct evidence"],
+                        "reason": "brief Chinese reason",
+                    },
+                    "distilled_directory": directory,
+                },
+                ensure_ascii=False,
+            ),
+        },
+    ]
+    return deepseek_json(messages, timeout=int(config.get("query_timeout_seconds", 60)) + 60)
+
+
+def deepseek_answer_from_evidence(question: str, evidence: list[dict[str, Any]], config: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    compact_evidence = []
+    for item in evidence:
+        compact_evidence.append(
+            {
+                "id": item.get("id"),
+                "section": item.get("section"),
+                "title": item.get("title"),
+                "html": item.get("html"),
+                "summary": item.get("summary"),
+                "what_happened": item.get("what_happened", [])[:8],
+                "important_facts": item.get("important_facts", [])[:10],
+                "decisions_or_conclusions": item.get("decisions_or_conclusions", [])[:6],
+                "open_questions_or_next_steps": item.get("open_questions_or_next_steps", [])[:4],
+                "people_organizations_equipment": item.get("people_organizations_equipment", [])[:10],
+            }
+        )
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "你是“实验室大师兄”。用 Telegram 适合的短回复回答，中文，自然，不要写“结论/置信度/score”。"
+                "必须忠于证据。如果证据无法直接回答，reply 必须是：师兄我也不知道，notebook 里没找到明确记录。"
+                "有证据时最多 6 行，先直接回答，再给关键做法/数量/参数。"
+                "不要主动输出密码、token、密钥、序列号等敏感凭据，即使证据里出现了。只输出 JSON。"
+            ),
+        },
+        {
+            "role": "user",
+            "content": json.dumps(
+                {
+                    "question": question,
+                    "output_schema": {
+                        "has_answer": "boolean",
+                        "reply": "short Chinese Telegram reply",
+                        "used_evidence_ids": ["integers"],
+                    },
+                    "evidence": compact_evidence,
+                },
+                ensure_ascii=False,
+            ),
+        },
+    ]
+    return deepseek_json(messages, timeout=int(config.get("query_timeout_seconds", 60)) + 60)
+
+
 def query_notebook(question: str, config: dict[str, Any]) -> dict[str, Any]:
-    top_k = int(config.get("default_top_k", 5))
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(QUERY_SCRIPT),
-            question,
-            "--top-k",
-            str(top_k),
-            "--include-source-snippets",
-            "--format",
-            "json",
-        ],
-        check=False,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        timeout=int(config.get("query_timeout_seconds", 60)),
-    )
-    if result.returncode:
-        return {"error": f"查询失败：{result.stderr.strip() or result.stdout.strip() or result.returncode}"}
-    return json.loads(result.stdout)
+    try:
+        pages = load_distilled_pages()
+        selection, select_usage = deepseek_select_evidence(question, pages, config)
+        raw_ids = selection.get("selected_ids") or []
+        selected_ids = []
+        for item in raw_ids:
+            try:
+                page_id = int(item)
+            except (TypeError, ValueError):
+                continue
+            if 1 <= page_id <= len(pages) and page_id not in selected_ids:
+                selected_ids.append(page_id)
+        if not selection.get("has_answer") or not selected_ids:
+            return {
+                "query": question,
+                "engine": "deepseek_runtime_distilled_directory",
+                "likely_done_before": "unknown",
+                "confidence": "low",
+                "top_score": 0,
+                "evidence_count": 0,
+                "evidence": [],
+                "answer": "师兄我也不知道，notebook 里没找到明确记录。",
+                "deepseek_selection": selection,
+                "usage": {"selection": select_usage},
+            }
+        evidence = [evidence_from_page(pages[page_id - 1], page_id) for page_id in selected_ids]
+        answer_data, answer_usage = deepseek_answer_from_evidence(question, evidence, config)
+        has_answer = bool(answer_data.get("has_answer")) and bool(evidence)
+        reply = str(answer_data.get("reply") or "").strip()
+        if not has_answer:
+            reply = "师兄我也不知道，notebook 里没找到明确记录。"
+            evidence = []
+        return {
+            "query": question,
+            "engine": "deepseek_runtime_distilled_directory",
+            "likely_done_before": "yes" if has_answer else "unknown",
+            "confidence": "deepseek",
+            "top_score": 100 if has_answer else 0,
+            "evidence_count": len(evidence),
+            "evidence": evidence,
+            "answer": reply,
+            "deepseek_selection": selection,
+            "usage": {"selection": select_usage, "answer": answer_usage},
+        }
+    except Exception as exc:
+        return {"error": f"DeepSeek 查询失败：{type(exc).__name__}: {exc}"}
 
 
 def render_query_html(question: str, result: dict[str, Any], output: Path) -> None:
@@ -280,9 +491,11 @@ def render_query_html(question: str, result: dict[str, Any], output: Path) -> No
 def short_query_reply(question: str, result: dict[str, Any]) -> str:
     if result.get("error"):
         return str(result["error"])
+    if result.get("answer"):
+        return str(result["answer"])
     evidence = result.get("evidence", [])
-    if not evidence:
-        return f"我没在现有 notebook 里找到明确记录。详情我放在 HTML 里了。"
+    if not has_clear_notebook_evidence(result):
+        return "师兄我也不知道，notebook 里没找到明确记录。"
     top = evidence[0]
     facts = top.get("important_facts") or []
     happened = top.get("what_happened") or []
@@ -304,6 +517,18 @@ def short_query_reply(question: str, result: dict[str, Any]) -> str:
     lines.extend(f"- {item}" for item in bullets)
     lines.append("\n更完整的原文和来源我放在 HTML 里。")
     return "\n".join(lines)
+
+
+def has_clear_notebook_evidence(result: dict[str, Any]) -> bool:
+    if result.get("error"):
+        return False
+    if not result.get("evidence"):
+        return False
+    if str(result.get("likely_done_before", "unknown")) == "unknown":
+        return False
+    if str(result.get("confidence", "low")) == "low":
+        return False
+    return float(result.get("top_score") or 0) >= 8.0
 
 
 def build_file_index(config: dict[str, Any]) -> list[dict[str, Any]]:
@@ -693,7 +918,7 @@ def handle_message(token: str, message: dict[str, Any], config: dict[str, Any], 
         detail_path = daily_person_dir(chat_id, user, config) / "query_html" / f"{datetime.now().astimezone().strftime('%H%M%S')}_{safe_name(body, 'query')}.html"
         render_query_html(body, result, detail_path)
         send_message(token, chat_id, short_query_reply(body, result))
-        if config.get("send_html_details", True):
+        if config.get("send_html_details", True) and has_clear_notebook_evidence(result):
             send_document(token, chat_id, detail_path, "查询详情 HTML")
 
 

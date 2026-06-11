@@ -80,11 +80,16 @@ def flatten(value: Any) -> str:
     return str(value)
 
 
+CJK_STOP_CHARS = set("我们你您他她它这那哪的了是有在和与及或吗呢啊吧呀几多少什么怎么如何请问大师兄")
+
+
 def cjk_ngrams(text: str) -> list[str]:
-    chars = re.findall(r"[\u3400-\u9fff]", text)
-    grams = chars[:]
-    grams.extend("".join(chars[index : index + 2]) for index in range(max(0, len(chars) - 1)))
-    grams.extend("".join(chars[index : index + 3]) for index in range(max(0, len(chars) - 2)))
+    chars = [char for char in re.findall(r"[\u3400-\u9fff]", text) if char not in CJK_STOP_CHARS]
+    if len(chars) <= 1:
+        return chars
+    grams: list[str] = []
+    for size in (2, 3, 4):
+        grams.extend("".join(chars[index : index + size]) for index in range(max(0, len(chars) - size + 1)))
     return grams
 
 

@@ -1,0 +1,4 @@
+interface:
+  display_name: "实验室大师兄"
+  short_description: "查询实验室 notebook 索引，回答之前是否做过以及怎么做。"
+  default_prompt: "请用实验室大师兄查询 lab notebook：我们之前做过某件事吗？怎么做的？证据在哪里？"

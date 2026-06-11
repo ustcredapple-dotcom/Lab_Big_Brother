@@ -18,6 +18,20 @@ AI_Agent/Lab_Memory_Agent/
   sources/      original evidence
 ```
 
+## 实验室大师兄
+
+`AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/` is the GPT-facing lab notebook query interface.
+
+Use it when asking whether the lab has done something before and how it was done. The skill queries the DeepSeek-distilled notebook index first, then points back to the source HTML evidence.
+
+Example:
+
+```bash
+python3 AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/query_lab_notebook.py \
+  "我们之前做过 DDS 验收吗？怎么做的？" \
+  --include-source-snippets
+```
+
 ## Quick Start
 
 ```bash
@@ -42,4 +56,3 @@ The GitHub repository is public. Raw notebook exports, real memory entries, gene
 ## Repository
 
 [ustcredapple-dotcom/Lab_Big_Brother](https://github.com/ustcredapple-dotcom/Lab_Big_Brother)
-

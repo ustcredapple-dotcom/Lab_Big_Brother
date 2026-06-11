@@ -18,3 +18,11 @@ Current notebook coverage:
 - `Yb ultracold ion-atom hybrid`: 22 pages
 
 Do not expose credentials from `/Volumes/ZZLab_AI/Key/`.
+
+Local web interface:
+
+```bash
+python /Volumes/ZZLab_AI/AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/serve_lab_senior_brother.py
+```
+
+Open `http://127.0.0.1:8765/` after the server starts.

@@ -32,6 +32,14 @@ python3 AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/query_lab_no
   --include-source-snippets
 ```
 
+Local web UI:
+
+```bash
+python3 AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/serve_lab_senior_brother.py
+```
+
+Then open `http://127.0.0.1:8765/`. The browser talks to a local Python server; the DeepSeek API key is read only by the server and is not embedded in the HTML page.
+
 ## Quick Start
 
 ```bash

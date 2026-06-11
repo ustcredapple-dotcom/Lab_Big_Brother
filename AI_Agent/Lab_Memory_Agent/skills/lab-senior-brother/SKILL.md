@@ -27,6 +27,18 @@ python /Volumes/ZZLab_AI/AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scr
 - Evidence: cite page titles and absolute HTML paths
 - Caveats / next checks: mention uncertainty, missing data, or source pages to inspect
 
+## Web Interface
+
+To launch the local browser UI:
+
+```bash
+python /Volumes/ZZLab_AI/AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/serve_lab_senior_brother.py
+```
+
+Then open `http://127.0.0.1:8765/`.
+
+The browser never receives the DeepSeek API key. The local Python server reads the key, queries the notebook index, calls DeepSeek when enabled, and returns the answer plus source HTML links.
+
 ## Data Sources
 
 For current paths and source hierarchy, read `references/data_sources.md` when needed.

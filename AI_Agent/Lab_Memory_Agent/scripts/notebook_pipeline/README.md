@@ -52,11 +52,25 @@ python daily_notebook_update.py
 The daily updater:
 
 - optionally runs a private pre-sync command before indexing;
+- optionally merges a fresh incoming HTML export into the active HTML tree;
+- skips duplicate pages so identical HTML is not stored twice;
 - rebuilds `HTML_INDEX.html` and `HTML_MANIFEST.json`;
 - compares the current manifest and extracted page text against the previous daily snapshot;
 - writes timestamped JSON and Markdown change logs under `Document/Lab_Notebook_Processing/daily_updates/changes/`;
 - sends only added or modified pages to DeepSeek;
 - merges those refreshed page records into `html_deepseek_distilled/DEEPSEEK_DISTILLATION.json/html`.
+
+Private daily config can set:
+
+```json
+{
+  "pre_sync_command": "",
+  "incoming_html_root": "/Volumes/ZZLab_AI/Document/Lab_Notebook_Processing/html/incoming",
+  "cleanup_incoming_html": true
+}
+```
+
+`incoming_html_root` should be a temporary one2html-style export tree. When `cleanup_incoming_html` is true, duplicate incoming page HTML and referenced attachment files are removed after they are confirmed to match active content. The active HTML tree remains the single durable readable copy.
 
 The first baseline run should use `--no-deepseek` so existing pages are recorded without paying to redistill the whole notebook:
 

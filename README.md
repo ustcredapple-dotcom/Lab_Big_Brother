@@ -59,7 +59,7 @@ Nightly notebook maintenance:
 python3 AI_Agent/Lab_Memory_Agent/scripts/notebook_pipeline/daily_notebook_update.py
 ```
 
-This builds a fresh HTML manifest, compares it with the previous snapshot, writes timestamped JSON/Markdown change logs, and sends only added or modified pages to DeepSeek before merging those page records back into the distilled index. A macOS LaunchAgent can run the script every day at `00:00`; keep any cloud-sync command in private local configuration, not in Git.
+This can first merge a fresh incoming HTML export into the active HTML tree, skipping duplicate pages and copying only added or changed pages plus their referenced attachments. It then builds a fresh HTML manifest, compares it with the previous snapshot, writes timestamped JSON/Markdown change logs, and sends only added or modified pages to DeepSeek before merging those page records back into the distilled index. A macOS LaunchAgent can run the script every day at `00:00`; keep any cloud-sync command in private local configuration, not in Git.
 
 ## Quick Start
 

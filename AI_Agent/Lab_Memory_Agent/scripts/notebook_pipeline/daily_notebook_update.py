@@ -7,6 +7,7 @@ import html
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -31,6 +32,7 @@ DEFAULT_MANIFEST = DEFAULT_PROCESSING / "html/active/HTML_MANIFEST.json"
 DEFAULT_DISTILLATION_DIR = DEFAULT_PROCESSING / "html_deepseek_distilled"
 DEFAULT_STATE_DIR = DEFAULT_PROCESSING / "daily_updates"
 DEFAULT_CONFIG = DEFAULT_PROCESSING / "daily_update_config.json"
+DEFAULT_INCOMING_HTML_ROOT = DEFAULT_PROCESSING / "html/incoming"
 
 
 def now_stamp() -> str:
@@ -50,6 +52,14 @@ def read_json(path: Path, default: Any) -> Any:
 def write_json(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def stable_page_key(page: dict[str, Any]) -> str:
@@ -72,6 +82,148 @@ def flatten_manifest(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 def extract_page_text(html_root: Path, page: dict[str, Any]) -> tuple[str, list[str]]:
     return deepseek_distill.extract_html(html_root / page["html"])
+
+
+def safe_relative(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def copy_if_changed(source: Path, target: Path) -> str:
+    if not source.is_file():
+        return "missing"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists() and sha256(source) == sha256(target):
+        return "duplicate"
+    shutil.copy2(source, target)
+    return "copied"
+
+
+def resolve_attachment(page_path: Path, attachment: str) -> Path | None:
+    if not attachment or "://" in attachment or attachment.startswith("#"):
+        return None
+    clean = attachment.split("#", 1)[0].split("?", 1)[0]
+    candidate = (page_path.parent / clean).resolve()
+    return candidate if candidate.exists() else None
+
+
+def prune_empty_dirs(root: Path) -> None:
+    if not root.exists():
+        return
+    for path in sorted([item for item in root.rglob("*") if item.is_dir()], key=lambda item: len(item.parts), reverse=True):
+        try:
+            path.rmdir()
+        except OSError:
+            pass
+
+
+def maybe_remove(path: Path, cleanup: bool, incoming_root: Path) -> bool:
+    if not cleanup:
+        return False
+    if not safe_relative(path, incoming_root):
+        return False
+    if path.exists() and path.is_file():
+        path.unlink()
+        return True
+    return False
+
+
+def merge_incoming_html(incoming_root: Path, active_root: Path, cleanup: bool) -> dict[str, Any]:
+    incoming_root = incoming_root.expanduser().resolve()
+    active_root = active_root.expanduser().resolve()
+    empty_result = {
+        "enabled": False,
+        "incoming_root": str(incoming_root),
+        "added_pages": 0,
+        "updated_pages": 0,
+        "duplicate_pages": 0,
+        "copied_files": 0,
+        "duplicate_files": 0,
+        "removed_incoming_files": 0,
+    }
+    if not incoming_root.exists():
+        return empty_result
+    if incoming_root == active_root:
+        return {**empty_result, "enabled": False, "note": "incoming_html_root equals active html_root; merge skipped"}
+    if not safe_relative(incoming_root, DEFAULT_PROCESSING):
+        return {**empty_result, "enabled": False, "note": "incoming_html_root is outside Lab_Notebook_Processing; merge skipped for safety"}
+
+    incoming_manifest = html_index.build_manifest(incoming_root)
+    active_manifest = html_index.build_manifest(active_root) if active_root.exists() else {"sections": []}
+    incoming_pages = flatten_manifest(incoming_manifest)
+    active_pages = flatten_manifest(active_manifest)
+    copied_files = 0
+    duplicate_files = 0
+    removed_files = 0
+    added_pages = 0
+    updated_pages = 0
+    duplicate_pages = 0
+
+    for section in incoming_manifest.get("sections", []):
+        index_rel = section.get("index_html", "")
+        if index_rel:
+            source_index = incoming_root / index_rel
+            status = copy_if_changed(source_index, active_root / index_rel)
+            if status == "copied":
+                copied_files += 1
+            elif status == "duplicate":
+                duplicate_files += 1
+            if status in {"copied", "duplicate"}:
+                removed_files += int(maybe_remove(source_index, cleanup, incoming_root))
+
+    for key, page in incoming_pages.items():
+        incoming_page_path = incoming_root / page["html"]
+        active_page_path = active_root / page["html"]
+        previous = active_pages.get(key)
+        same_content = bool(previous and previous.get("sha256") == page.get("sha256"))
+        if same_content:
+            duplicate_pages += 1
+        elif previous:
+            updated_pages += 1
+        else:
+            added_pages += 1
+
+        _text, attachments = deepseek_distill.extract_html(incoming_page_path)
+        status = copy_if_changed(incoming_page_path, active_page_path)
+        if status == "copied":
+            copied_files += 1
+        elif status == "duplicate":
+            duplicate_files += 1
+        if status in {"copied", "duplicate"}:
+            removed_files += int(maybe_remove(incoming_page_path, cleanup, incoming_root))
+
+        copied_attachment_paths: set[Path] = set()
+        for attachment in attachments:
+            source = resolve_attachment(incoming_page_path, attachment)
+            if not source or source in copied_attachment_paths or not safe_relative(source, incoming_root):
+                continue
+            copied_attachment_paths.add(source)
+            target = active_page_path.parent / source.relative_to(incoming_page_path.parent)
+            attachment_status = copy_if_changed(source, target)
+            if attachment_status == "copied":
+                copied_files += 1
+            elif attachment_status == "duplicate":
+                duplicate_files += 1
+            if attachment_status in {"copied", "duplicate"}:
+                removed_files += int(maybe_remove(source, cleanup, incoming_root))
+
+    if cleanup:
+        prune_empty_dirs(incoming_root)
+
+    return {
+        "enabled": True,
+        "incoming_root": str(incoming_root),
+        "added_pages": added_pages,
+        "updated_pages": updated_pages,
+        "duplicate_pages": duplicate_pages,
+        "copied_files": copied_files,
+        "duplicate_files": duplicate_files,
+        "removed_incoming_files": removed_files,
+        "cleanup": cleanup,
+    }
 
 
 def run_pre_sync(command: str, log_dir: Path) -> dict[str, Any]:
@@ -189,7 +341,7 @@ def classify_changes(
     return changes, current_texts
 
 
-def render_changelog_markdown(detected_at: str, changes: list[dict[str, Any]], pre_sync: dict[str, Any]) -> str:
+def render_changelog_markdown(detected_at: str, changes: list[dict[str, Any]], pre_sync: dict[str, Any], merge_result: dict[str, Any]) -> str:
     counts = {"added": 0, "modified": 0, "removed": 0}
     for change in changes:
         counts[change["type"]] = counts.get(change["type"], 0) + 1
@@ -202,6 +354,11 @@ def render_changelog_markdown(detected_at: str, changes: list[dict[str, Any]], p
         f"- Removed: {counts.get('removed', 0)}",
         f"- Pre-sync enabled: {pre_sync.get('enabled', False)}",
         f"- Pre-sync return code: {pre_sync.get('returncode', 0)}",
+        f"- HTML merge enabled: {merge_result.get('enabled', False)}",
+        f"- HTML merge added pages: {merge_result.get('added_pages', 0)}",
+        f"- HTML merge updated pages: {merge_result.get('updated_pages', 0)}",
+        f"- HTML merge duplicate pages: {merge_result.get('duplicate_pages', 0)}",
+        f"- Removed incoming duplicate files: {merge_result.get('removed_incoming_files', 0)}",
         "",
     ]
     if not changes:
@@ -422,6 +579,8 @@ def main() -> None:
     parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
     parser.add_argument("--distillation-dir", type=Path, default=DEFAULT_DISTILLATION_DIR)
     parser.add_argument("--state-dir", type=Path, default=DEFAULT_STATE_DIR)
+    parser.add_argument("--incoming-html-root", type=Path)
+    parser.add_argument("--cleanup-incoming", action="store_true")
     parser.add_argument("--key-file", type=Path, default=Path("/Volumes/ZZLab_AI/Key/Deepseek Key.txt"))
     parser.add_argument("--model", default="deepseek-chat")
     parser.add_argument("--timeout", type=int, default=180)
@@ -431,10 +590,14 @@ def main() -> None:
 
     config = load_config(args.config)
     pre_sync_command = os.environ.get("ZZLAB_NOTEBOOK_PRE_SYNC_COMMAND", config.get("pre_sync_command", ""))
+    incoming_html_root_value = os.environ.get("ZZLAB_NOTEBOOK_INCOMING_HTML_ROOT", config.get("incoming_html_root", ""))
+    incoming_html_root = args.incoming_html_root or (Path(incoming_html_root_value) if incoming_html_root_value else DEFAULT_INCOMING_HTML_ROOT)
+    cleanup_incoming = args.cleanup_incoming or bool(config.get("cleanup_incoming_html", False))
     detected_at = now_stamp()
     args.state_dir.mkdir(parents=True, exist_ok=True)
     log_dir = args.state_dir / "logs"
     pre_sync = run_pre_sync(pre_sync_command, log_dir)
+    merge_result = merge_incoming_html(incoming_html_root, args.html_root, cleanup_incoming)
 
     manifest = html_index.build_manifest(args.html_root.resolve())
     args.index.parent.mkdir(parents=True, exist_ok=True)
@@ -460,6 +623,7 @@ def main() -> None:
     change_payload = {
         "detected_at": detected_at,
         "pre_sync": pre_sync,
+        "html_merge": merge_result,
         "html_root": str(args.html_root),
         "manifest": str(args.manifest),
         "counts": {
@@ -471,7 +635,7 @@ def main() -> None:
     }
     write_json(changelog_json, change_payload)
     changelog_md.parent.mkdir(parents=True, exist_ok=True)
-    changelog_md.write_text(render_changelog_markdown(detected_at, changes, pre_sync), encoding="utf-8")
+    changelog_md.write_text(render_changelog_markdown(detected_at, changes, pre_sync, merge_result), encoding="utf-8")
 
     deepseek_result = {"distilled_pages": 0, "removed_pages": 0, "skipped": args.no_deepseek or not changes}
     if changes and not args.no_deepseek:
@@ -498,6 +662,7 @@ def main() -> None:
         "changelog_json": str(changelog_json),
         "changelog_md": str(changelog_md),
         "pre_sync": pre_sync,
+        "html_merge": merge_result,
         "deepseek": deepseek_result,
     }
     print(json.dumps(result, ensure_ascii=False, indent=2))

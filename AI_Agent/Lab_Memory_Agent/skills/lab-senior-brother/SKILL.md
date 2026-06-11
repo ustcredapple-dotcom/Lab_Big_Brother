@@ -89,4 +89,4 @@ For routine maintenance, prefer the daily incremental updater:
 python /Volumes/ZZLab_AI/AI_Agent/Lab_Memory_Agent/scripts/notebook_pipeline/daily_notebook_update.py
 ```
 
-It compares the current HTML notebook against the previous snapshot, writes timestamped change logs, and sends only added or modified pages to DeepSeek before merging the refreshed page records into the distilled index. Use `--no-deepseek` only for baseline seeding or dry verification.
+It can merge a fresh incoming HTML export into the active HTML tree first, skipping duplicate pages so the notebook is not stored twice. It then compares the active HTML notebook against the previous snapshot, writes timestamped change logs, and sends only added or modified pages to DeepSeek before merging the refreshed page records into the distilled index. Use `--no-deepseek` only for baseline seeding or dry verification.

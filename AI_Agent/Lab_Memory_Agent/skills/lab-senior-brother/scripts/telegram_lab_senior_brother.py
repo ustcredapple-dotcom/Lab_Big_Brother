@@ -6,9 +6,6 @@ import re
 import subprocess
 import sys
 import time
-import urllib.error
-import urllib.parse
-import urllib.request
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -69,23 +66,33 @@ def default_config() -> dict[str, Any]:
 
 
 def telegram_request(token: str, method: str, payload: dict[str, Any] | None = None, timeout: int = 60) -> dict[str, Any]:
-    data = None
-    headers = {}
-    if payload is not None:
-        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        headers["Content-Type"] = "application/json"
-    request = urllib.request.Request(
+    command = [
+        "curl",
+        "-sS",
+        "--fail-with-body",
         f"https://api.telegram.org/bot{token}/{method}",
-        data=data,
-        headers=headers,
-        method="POST" if data is not None else "GET",
+    ]
+    if payload is not None:
+        command.extend(
+            [
+                "-H",
+                "Content-Type: application/json",
+                "-d",
+                json.dumps(payload, ensure_ascii=False),
+            ]
+        )
+    completed = subprocess.run(
+        command,
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=timeout,
     )
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            result = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Telegram API {method} failed {exc.code}: {body}") from exc
+    if completed.returncode:
+        detail = completed.stdout.strip() or completed.stderr.strip() or f"curl exited {completed.returncode}"
+        raise RuntimeError(f"Telegram API {method} failed: {detail}")
+    result = json.loads(completed.stdout)
     if not result.get("ok"):
         raise RuntimeError(f"Telegram API {method} returned not ok: {json.dumps(result, ensure_ascii=False)}")
     return result

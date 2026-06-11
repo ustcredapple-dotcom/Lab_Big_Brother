@@ -26,3 +26,10 @@ python /Volumes/ZZLab_AI/AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scr
 ```
 
 Open `http://127.0.0.1:8765/` after the server starts.
+
+Public tunnel notes:
+
+- The web server supports Basic Auth through `--access-user` / `--access-password` or `LAB_SENIOR_BROTHER_USER` / `LAB_SENIOR_BROTHER_PASSWORD`.
+- ngrok is used only as a transport from the public URL to local port `8765`.
+- Runtime credentials and ngrok authtokens live in private local files, not in the public repository.
+- A public tunnel gives remote users access to the query UI and can consume DeepSeek API quota, so share the URL and login only with trusted users.

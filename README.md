@@ -42,6 +42,17 @@ Then open `http://127.0.0.1:8765/`. The browser talks to a local Python server; 
 
 The UI includes a `中文 / English` toggle for the final answer language.
 
+Public sharing can be enabled by running the same local server behind an ngrok tunnel. Keep the tunnel protected with Basic Auth and store runtime credentials only in local private configuration, never in Git:
+
+```bash
+python3 AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/serve_lab_senior_brother.py \
+  --access-user "$LAB_SENIOR_BROTHER_USER" \
+  --access-password "$LAB_SENIOR_BROTHER_PASSWORD"
+ngrok http 8765
+```
+
+The public URL may change when ngrok is restarted unless a reserved domain is configured. Anyone with the URL and Basic Auth credentials can query the notebook interface and may consume DeepSeek API quota.
+
 ## Quick Start
 
 ```bash

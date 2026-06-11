@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import mimetypes
+import os
 import subprocess
 import sys
 import webbrowser
@@ -256,7 +258,7 @@ def source_url_for(html_path: str) -> str:
         return ""
 
 
-def make_handler(model: str):
+def make_handler(model: str, access_user: str = "", access_password: str = ""):
     class Handler(BaseHTTPRequestHandler):
         server_version = "LabSeniorBrother/1.0"
 
@@ -271,7 +273,34 @@ def make_handler(model: str):
             self.end_headers()
             self.wfile.write(raw)
 
+        def authorized(self) -> bool:
+            if not access_user and not access_password:
+                return True
+            header = self.headers.get("Authorization", "")
+            if not header.startswith("Basic "):
+                return False
+            try:
+                decoded = base64.b64decode(header.removeprefix("Basic ").strip()).decode("utf-8")
+            except Exception:
+                return False
+            user, _, password = decoded.partition(":")
+            return user == access_user and password == access_password
+
+        def require_auth(self) -> bool:
+            if self.authorized():
+                return True
+            raw = b"Authentication required"
+            self.send_response(401)
+            self.send_header("WWW-Authenticate", 'Basic realm="Lab Senior Brother"')
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+            return False
+
         def do_GET(self) -> None:
+            if not self.require_auth():
+                return
             parsed = urlparse(self.path)
             if parsed.path in {"/", "/index.html"}:
                 raw = HTML_PAGE.encode("utf-8")
@@ -305,6 +334,8 @@ def make_handler(model: str):
             self.send_error(404)
 
         def do_POST(self) -> None:
+            if not self.require_auth():
+                return
             if urlparse(self.path).path != "/api/query":
                 self.send_error(404)
                 return
@@ -336,10 +367,14 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--model", default="deepseek-chat")
+    parser.add_argument("--access-user", default="")
+    parser.add_argument("--access-password", default="")
     parser.add_argument("--no-open", action="store_true")
     args = parser.parse_args()
 
-    server = ThreadingHTTPServer((args.host, args.port), make_handler(args.model))
+    access_user = args.access_user or os.environ.get("LAB_SENIOR_BROTHER_USER", "")
+    access_password = args.access_password or os.environ.get("LAB_SENIOR_BROTHER_PASSWORD", "")
+    server = ThreadingHTTPServer((args.host, args.port), make_handler(args.model, access_user, access_password))
     url = f"http://{args.host}:{args.port}/"
     print(f"实验室大师兄 running at {url}")
     print("Press Ctrl+C to stop.")

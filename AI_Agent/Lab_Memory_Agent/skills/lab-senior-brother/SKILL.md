@@ -41,6 +41,18 @@ The browser never receives the DeepSeek API key. The local Python server reads t
 
 The UI has a `中文 / English` response-language toggle. Use it to force the final DeepSeek answer language regardless of whether the retrieved notebook evidence is Chinese or English.
 
+For public access, run the local server with Basic Auth and expose port `8765` through ngrok:
+
+```bash
+LAB_SENIOR_BROTHER_USER="..." \
+LAB_SENIOR_BROTHER_PASSWORD="..." \
+python /Volumes/ZZLab_AI/AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/serve_lab_senior_brother.py
+
+ngrok http 8765
+```
+
+Do not write the real ngrok authtoken, Basic Auth password, DeepSeek key, or notebook sharing secrets into this skill, GitHub, or handoff files. Public tunnels should be treated as temporary operational state unless a reserved ngrok domain is intentionally configured.
+
 ## Data Sources
 
 For current paths and source hierarchy, read `references/data_sources.md` when needed.

@@ -30,6 +30,7 @@ HELP_TEXT = """实验室大师兄 Telegram 入口
 /id - 显示当前 chat_id，用于加入白名单
 /ask 问题 - 查询 lab notebook，默认不写入记忆
 /note 内容 - 写入一条待整理实验记录
+/allow chat_id - 将一个 Telegram chat_id 加入白名单（仅已授权账号可用）
 /开始记 - 进入连续记录模式
 /停止记 - 退出连续记录模式，恢复默认查询
 /status - 查看 bot 状态
@@ -194,6 +195,17 @@ def send_document(token: str, chat_id: int, path: Path, caption: str = "") -> No
 def allowed(chat_id: int, config: dict[str, Any]) -> bool:
     ids = [int(item) for item in config.get("allowed_chat_ids", [])]
     return chat_id in ids
+
+
+def add_allowed_chat_id(config_path: Path, target_chat_id: int) -> tuple[dict[str, Any], bool]:
+    config = read_json(config_path, default_config())
+    existing = [int(item) for item in config.get("allowed_chat_ids", [])]
+    if target_chat_id in existing:
+        return config, False
+    existing.append(target_chat_id)
+    config["allowed_chat_ids"] = existing
+    write_json(config_path, config)
+    return config, True
 
 
 def safe_name(value: str, fallback: str = "unknown") -> str:
@@ -859,6 +871,21 @@ def casual_chat_reply(text: str) -> str:
     return "你好，我在。大师兄已就位。\n你要查实验室记忆、采购记录、参数、谁做过什么，直接问就行。"
 
 
+def extract_chat_id(text: str) -> int | None:
+    matches = re.findall(r"(?<!\d)(\d{6,15})(?!\d)", text)
+    if not matches:
+        return None
+    return int(matches[0])
+
+
+def is_allowlist_request(text: str) -> bool:
+    lowered = text.casefold()
+    if extract_chat_id(text) is None:
+        return False
+    allow_words = ("白名单", "allowlist", "allowed_chat_ids", "授权", "允许访问", "加入", "写进", "加进")
+    return any(word in lowered for word in allow_words)
+
+
 def parse_command(text: str) -> tuple[str, str]:
     stripped = text.strip()
     lowered = stripped.casefold()
@@ -870,6 +897,8 @@ def parse_command(text: str) -> tuple[str, str]:
         return "ask", stripped[4:].strip()
     if lowered.startswith("/note"):
         return "note", stripped[5:].strip()
+    if lowered.startswith("/allow"):
+        return "allow", stripped[6:].strip()
     if lowered.startswith("/help"):
         return "help", ""
     if lowered.startswith("/start"):
@@ -880,6 +909,9 @@ def parse_command(text: str) -> tuple[str, str]:
         return "status", ""
     if is_help_request(stripped):
         return "help", ""
+    if is_allowlist_request(stripped):
+        target = extract_chat_id(stripped)
+        return "allow", str(target) if target is not None else ""
     if is_casual_chat(stripped):
         return "chat", stripped
     if stripped.startswith("查"):
@@ -930,6 +962,18 @@ def handle_message(token: str, message: dict[str, Any], config: dict[str, Any], 
 
     if command == "help":
         send_message(token, chat_id, HELP_TEXT)
+    elif command == "allow":
+        target = extract_chat_id(body)
+        if target is None:
+            send_message(token, chat_id, "把要加入白名单的 chat_id 发给我，例如：/allow 8004894761")
+            return
+        updated_config, changed = add_allowed_chat_id(DEFAULT_CONFIG, target)
+        config.update(updated_config)
+        append_chat_record(chat_id, user, message, config, "admin", f"allow {target}", saved_files)
+        if changed:
+            send_message(token, chat_id, f"已写进白名单：{target}")
+        else:
+            send_message(token, chat_id, f"{target} 已经在白名单里了。")
     elif command == "chat":
         if mode == "record":
             path = save_note(display_text, chat_id, user, config)

@@ -570,6 +570,19 @@ def save_message_files(token: str, message: dict[str, Any], chat_id: int, user: 
 def parse_command(text: str) -> tuple[str, str]:
     stripped = text.strip()
     lowered = stripped.casefold()
+    help_phrases = (
+        "有哪些指令",
+        "有什么指令",
+        "怎么用",
+        "使用说明",
+        "帮助",
+        "命令",
+        "指令",
+        "help",
+        "commands",
+    )
+    if any(phrase in lowered for phrase in help_phrases):
+        return "help", ""
     if lowered in {"/开始记", "开始记", "开始记录", "/record_on"}:
         return "record_on", ""
     if lowered in {"/停止记", "停止记", "停止记录", "/record_off"}:

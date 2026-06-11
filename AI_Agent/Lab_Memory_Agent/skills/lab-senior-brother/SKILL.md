@@ -82,3 +82,11 @@ When new notebook HTML exports are added:
 2. Refresh `DEEPSEEK_DISTILLATION.html/json` using `distill_html_with_deepseek.py` if external API use is approved.
 3. Re-run this skill's query script on representative questions to verify retrieval quality.
 4. Update `PROJECT_HANDOFF.md` and `WORK_LOG.md` after significant changes.
+
+For routine maintenance, prefer the daily incremental updater:
+
+```bash
+python /Volumes/ZZLab_AI/AI_Agent/Lab_Memory_Agent/scripts/notebook_pipeline/daily_notebook_update.py
+```
+
+It compares the current HTML notebook against the previous snapshot, writes timestamped change logs, and sends only added or modified pages to DeepSeek before merging the refreshed page records into the distilled index. Use `--no-deepseek` only for baseline seeding or dry verification.

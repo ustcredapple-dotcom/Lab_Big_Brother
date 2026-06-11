@@ -43,6 +43,27 @@ python distill_html_with_deepseek.py \
   --output-dir /Volumes/ZZLab_AI/Document/Lab_Notebook_Processing/html_deepseek_distilled
 ```
 
+Run the daily incremental updater:
+
+```bash
+python daily_notebook_update.py
+```
+
+The daily updater:
+
+- optionally runs a private pre-sync command before indexing;
+- rebuilds `HTML_INDEX.html` and `HTML_MANIFEST.json`;
+- compares the current manifest and extracted page text against the previous daily snapshot;
+- writes timestamped JSON and Markdown change logs under `Document/Lab_Notebook_Processing/daily_updates/changes/`;
+- sends only added or modified pages to DeepSeek;
+- merges those refreshed page records into `html_deepseek_distilled/DEEPSEEK_DISTILLATION.json/html`.
+
+The first baseline run should use `--no-deepseek` so existing pages are recorded without paying to redistill the whole notebook:
+
+```bash
+python daily_notebook_update.py --no-deepseek
+```
+
 ## Outputs
 
 - `HTML_INDEX.html`: human- and AI-friendly page index with links and previews.
@@ -51,6 +72,7 @@ python distill_html_with_deepseek.py \
 - `html_distilled/LOCAL_DISTILLATION.json`: machine-readable local distillation.
 - `html_deepseek_distilled/DEEPSEEK_DISTILLATION.html`: DeepSeek-generated notebook digest.
 - `html_deepseek_distilled/DEEPSEEK_DISTILLATION.json`: machine-readable DeepSeek distillation with page, section, and notebook summaries.
+- `daily_updates/`: private daily snapshots, text diffs, logs, and incremental-update state.
 
 ## Safety Rules
 
@@ -59,3 +81,4 @@ python distill_html_with_deepseek.py \
 - Keep private notebook content and generated HTML out of the public repository.
 - Preserve relative links inside the HTML tree so attachments remain readable.
 - Send notebook content to external APIs only with explicit project-owner approval.
+- Do not put cloud tokens, passwords, or sharing secrets in the daily updater config or logs.

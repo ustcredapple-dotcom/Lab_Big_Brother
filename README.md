@@ -53,6 +53,14 @@ ngrok http 8765
 
 The public URL may change when ngrok is restarted unless a reserved domain is configured. Anyone with the URL and Basic Auth credentials can query the notebook interface and may consume DeepSeek API quota.
 
+Nightly notebook maintenance:
+
+```bash
+python3 AI_Agent/Lab_Memory_Agent/scripts/notebook_pipeline/daily_notebook_update.py
+```
+
+This builds a fresh HTML manifest, compares it with the previous snapshot, writes timestamped JSON/Markdown change logs, and sends only added or modified pages to DeepSeek before merging those page records back into the distilled index. A macOS LaunchAgent can run the script every day at `00:00`; keep any cloud-sync command in private local configuration, not in Git.
+
 ## Quick Start
 
 ```bash

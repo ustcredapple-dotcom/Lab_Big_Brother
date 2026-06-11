@@ -813,6 +813,52 @@ def is_help_request(text: str) -> bool:
     return any(re.search(pattern, lowered) for pattern in help_patterns)
 
 
+def normalized_intent_text(text: str) -> str:
+    lowered = text.strip().casefold()
+    normalized = re.sub(r"[\s，。！？,.!?：:；;、~～]+", "", lowered)
+    normalized = re.sub(r"^(大师兄|实验室大师兄|zzlabbigbrother|bot|机器人)+", "", normalized)
+    return normalized
+
+
+def is_casual_chat(text: str) -> bool:
+    normalized = normalized_intent_text(text)
+    if not normalized:
+        return False
+    casual_exact = {
+        "你好",
+        "您好",
+        "hello",
+        "hi",
+        "hey",
+        "哈喽",
+        "在吗",
+        "在不在",
+        "早",
+        "早上好",
+        "中午好",
+        "下午好",
+        "晚上好",
+        "辛苦了",
+        "谢谢",
+        "多谢",
+        "感谢",
+        "thx",
+        "thanks",
+    }
+    return normalized in casual_exact
+
+
+def casual_chat_reply(text: str) -> str:
+    normalized = normalized_intent_text(text)
+    if normalized in {"谢谢", "多谢", "感谢", "thx", "thanks"}:
+        return "不客气，我在。"
+    if normalized == "辛苦了":
+        return "不辛苦，我守着 notebook 呢。"
+    if normalized in {"在吗", "在不在"}:
+        return "在。大师兄已就位。"
+    return "你好，我在。大师兄已就位。\n你要查实验室记忆、采购记录、参数、谁做过什么，直接问就行。"
+
+
 def parse_command(text: str) -> tuple[str, str]:
     stripped = text.strip()
     lowered = stripped.casefold()
@@ -834,6 +880,8 @@ def parse_command(text: str) -> tuple[str, str]:
         return "status", ""
     if is_help_request(stripped):
         return "help", ""
+    if is_casual_chat(stripped):
+        return "chat", stripped
     if stripped.startswith("查"):
         return "ask", stripped[1:].strip()
     if stripped.startswith("记"):
@@ -882,6 +930,14 @@ def handle_message(token: str, message: dict[str, Any], config: dict[str, Any], 
 
     if command == "help":
         send_message(token, chat_id, HELP_TEXT)
+    elif command == "chat":
+        if mode == "record":
+            path = save_note(display_text, chat_id, user, config)
+            append_chat_record(chat_id, user, message, config, "note", display_text, saved_files)
+            send_message(token, chat_id, f"已记：{path.name}")
+            return
+        append_chat_record(chat_id, user, message, config, "chat", display_text, saved_files)
+        send_message(token, chat_id, casual_chat_reply(display_text))
     elif command == "status":
         send_message(token, chat_id, f"大师兄 Telegram bot 正在运行。\n当前模式：{mode}\n默认：查询；开始记后默认写入。")
     elif command == "record_on":

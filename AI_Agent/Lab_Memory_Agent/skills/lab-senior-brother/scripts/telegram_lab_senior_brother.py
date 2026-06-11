@@ -290,6 +290,22 @@ def load_distilled_pages(path: Path = DEFAULT_DISTILLATION) -> list[dict[str, An
     return pages
 
 
+def as_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    if isinstance(value, dict):
+        return [f"{key}: {item}" for key, item in value.items()]
+    return [value]
+
+
+def first_items(value: Any, limit: int) -> list[Any]:
+    return as_list(value)[:limit]
+
+
 def compact_distilled_directory(pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     directory = []
     for index, page in enumerate(pages, start=1):
@@ -300,8 +316,8 @@ def compact_distilled_directory(pages: list[dict[str, Any]]) -> list[dict[str, A
                 "section": page.get("section", ""),
                 "title": page.get("title", ""),
                 "summary": distilled.get("one_sentence_summary", ""),
-                "tags": distilled.get("tags", [])[:8],
-                "people_organizations_equipment": distilled.get("people_organizations_equipment", [])[:8],
+                "tags": first_items(distilled.get("tags"), 8),
+                "people_organizations_equipment": first_items(distilled.get("people_organizations_equipment"), 8),
             }
         )
     return directory
@@ -326,15 +342,29 @@ def evidence_from_page(page: dict[str, Any], evidence_id: int) -> dict[str, Any]
         "html": str(DEFAULT_HTML_ROOT / page.get("html", "")),
         "source_sha256": page.get("source_sha256", ""),
         "summary": distilled.get("one_sentence_summary", ""),
-        "what_happened": distilled.get("what_happened", []),
-        "important_facts": distilled.get("important_facts", []),
-        "decisions_or_conclusions": distilled.get("decisions_or_conclusions", []),
-        "open_questions_or_next_steps": distilled.get("open_questions_or_next_steps", []),
-        "people_organizations_equipment": distilled.get("people_organizations_equipment", []),
-        "tags": distilled.get("tags", []),
-        "attachments": page.get("attachments", [])[:10],
+        "what_happened": as_list(distilled.get("what_happened")),
+        "important_facts": as_list(distilled.get("important_facts")),
+        "decisions_or_conclusions": as_list(distilled.get("decisions_or_conclusions")),
+        "open_questions_or_next_steps": as_list(distilled.get("open_questions_or_next_steps")),
+        "people_organizations_equipment": as_list(distilled.get("people_organizations_equipment")),
+        "tags": as_list(distilled.get("tags")),
+        "attachments": first_items(page.get("attachments"), 10),
         "source_snippet": source_snippet_for(page),
     }
+
+
+def retrieval_aliases(question: str) -> list[str]:
+    lowered = question.casefold()
+    aliases = []
+    if "真空" in lowered and "烤" in lowered:
+        aliases.append("真空烘烤")
+    if "电脑" in lowered or "计算机" in lowered:
+        aliases.append("Lab computers 计算机数量")
+    if "台子" in lowered or "光学平台" in lowered:
+        aliases.append("光学平台采购数量")
+    if "dds" in lowered:
+        aliases.append("DDS ARTIQ 测试 验收")
+    return aliases
 
 
 def deepseek_select_evidence(question: str, pages: list[dict[str, Any]], config: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -358,6 +388,7 @@ def deepseek_select_evidence(question: str, pages: list[dict[str, Any]], config:
             "content": json.dumps(
                 {
                     "question": question,
+                    "normalized_aliases": retrieval_aliases(question),
                     "max_evidence": max_evidence,
                     "output_schema": {
                         "has_answer": "boolean",
@@ -383,11 +414,11 @@ def deepseek_answer_from_evidence(question: str, evidence: list[dict[str, Any]],
                 "title": item.get("title"),
                 "html": item.get("html"),
                 "summary": item.get("summary"),
-                "what_happened": item.get("what_happened", [])[:8],
-                "important_facts": item.get("important_facts", [])[:10],
-                "decisions_or_conclusions": item.get("decisions_or_conclusions", [])[:6],
-                "open_questions_or_next_steps": item.get("open_questions_or_next_steps", [])[:4],
-                "people_organizations_equipment": item.get("people_organizations_equipment", [])[:10],
+                "what_happened": first_items(item.get("what_happened"), 8),
+                "important_facts": first_items(item.get("important_facts"), 10),
+                "decisions_or_conclusions": first_items(item.get("decisions_or_conclusions"), 6),
+                "open_questions_or_next_steps": first_items(item.get("open_questions_or_next_steps"), 4),
+                "people_organizations_equipment": first_items(item.get("people_organizations_equipment"), 10),
             }
         )
     messages = [

@@ -47,13 +47,18 @@ def default_root() -> Path:
 
 
 def git(root: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+    result = subprocess.run(
         ["git", "-C", str(root), *args],
-        check=check,
+        check=False,
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
     )
+    if check and result.returncode:
+        command = " ".join(args)
+        detail = result.stdout.strip() or "no Git output"
+        raise RuntimeError(f"git {command} failed:\n{detail}")
+    return result
 
 
 def staged_paths(root: Path) -> list[str]:

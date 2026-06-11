@@ -886,6 +886,87 @@ def is_allowlist_request(text: str) -> bool:
     return any(word in lowered for word in allow_words)
 
 
+def deepseek_agent_route(text: str, mode: str, config: dict[str, Any]) -> dict[str, Any]:
+    tools = [
+        {
+            "action": "query_notebook",
+            "when": "查实验室历史、notebook、采购、参数、做没做过、怎么做、谁负责、设备记录",
+            "required": ["body"],
+        },
+        {
+            "action": "note",
+            "when": "用户想写入/记录/保存一条实验记录或待办",
+            "required": ["body"],
+        },
+        {
+            "action": "find_file",
+            "when": "用户想要一个已归档文件、说明书、manual、datasheet、PDF、附件",
+            "required": ["body"],
+        },
+        {
+            "action": "allow_chat_id",
+            "when": "用户要把 Telegram chat_id 加入白名单或授权访问",
+            "required": ["target_chat_id"],
+        },
+        {"action": "help", "when": "用户问有哪些指令、怎么用、功能列表", "required": []},
+        {"action": "status", "when": "用户问 bot 状态、当前模式、是否运行", "required": []},
+        {"action": "chat", "when": "寒暄、感谢、轻量对话，不需要查 notebook 或改文件", "required": ["reply"]},
+        {
+            "action": "unsupported",
+            "when": "用户要求任意 shell、删除/移动大量文件、访问未授权系统、或不在工具表里的动作",
+            "required": ["reply"],
+        },
+    ]
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "你是 Telegram 上的“实验室大师兄”agent 路由器。"
+                "你的任务不是回答内容，而是从白名单工具中选择一个动作并抽取参数。"
+                "只能选择给定 action；不要发明工具；不要选择任意 shell 或未列出的文件操作。"
+                "如果是实验室事实问题，选 query_notebook。"
+                "如果是管理白名单，选 allow_chat_id。"
+                "如果是一般寒暄，选 chat，并写一句自然简短的 reply。"
+                "如果用户要求你现在做但没有对应安全工具，选 unsupported，并说明 Telegram 端还没接这个工具。"
+                "只输出 JSON。"
+            ),
+        },
+        {
+            "role": "user",
+            "content": json.dumps(
+                {
+                    "message": text,
+                    "current_mode": mode,
+                    "available_tools": tools,
+                    "output_schema": {
+                        "action": "one of query_notebook, note, find_file, allow_chat_id, help, status, chat, unsupported",
+                        "body": "string, question/note/file request when needed",
+                        "target_chat_id": "integer or null",
+                        "reply": "short Chinese text for chat/unsupported, otherwise empty",
+                        "reason": "brief Chinese reason",
+                    },
+                },
+                ensure_ascii=False,
+            ),
+        },
+    ]
+    try:
+        routed, _usage = deepseek_json(messages, timeout=int(config.get("query_timeout_seconds", 60)) + 30)
+    except Exception as exc:
+        if looks_like_file_request(text):
+            return {"action": "find_file", "body": text, "reply": "", "target_chat_id": None, "reason": f"fallback after DeepSeek route error: {exc}"}
+        return {"action": "query_notebook", "body": text, "reply": "", "target_chat_id": None, "reason": f"fallback after DeepSeek route error: {exc}"}
+    allowed_actions = {"query_notebook", "note", "find_file", "allow_chat_id", "help", "status", "chat", "unsupported"}
+    action = str(routed.get("action", "")).strip()
+    if action not in allowed_actions:
+        return {"action": "unsupported", "body": text, "reply": "这个动作我还没接到 Telegram 工具里。", "target_chat_id": None, "reason": f"invalid action: {action}"}
+    routed.setdefault("body", text)
+    routed.setdefault("target_chat_id", None)
+    routed.setdefault("reply", "")
+    routed.setdefault("reason", "")
+    return routed
+
+
 def parse_command(text: str) -> tuple[str, str]:
     stripped = text.strip()
     lowered = stripped.casefold()
@@ -918,10 +999,10 @@ def parse_command(text: str) -> tuple[str, str]:
         return "ask", stripped[1:].strip()
     if stripped.startswith("记"):
         return "note", stripped[1:].strip()
-    return "ask", stripped
+    return "agent", stripped
 
 
-def handle_message(token: str, message: dict[str, Any], config: dict[str, Any], state_path: Path) -> None:
+def handle_message(token: str, message: dict[str, Any], config: dict[str, Any], config_path: Path, state_path: Path) -> None:
     chat = message.get("chat") or {}
     chat_id = int(chat.get("id"))
     user = message.get("from") or {}
@@ -967,13 +1048,73 @@ def handle_message(token: str, message: dict[str, Any], config: dict[str, Any], 
         if target is None:
             send_message(token, chat_id, "把要加入白名单的 chat_id 发给我，例如：/allow 8004894761")
             return
-        updated_config, changed = add_allowed_chat_id(DEFAULT_CONFIG, target)
+        updated_config, changed = add_allowed_chat_id(config_path, target)
         config.update(updated_config)
         append_chat_record(chat_id, user, message, config, "admin", f"allow {target}", saved_files)
         if changed:
             send_message(token, chat_id, f"已写进白名单：{target}")
         else:
             send_message(token, chat_id, f"{target} 已经在白名单里了。")
+    elif command == "agent":
+        if mode == "record":
+            path = save_note(display_text, chat_id, user, config)
+            append_chat_record(chat_id, user, message, config, "note", display_text, saved_files)
+            send_message(token, chat_id, f"已记：{path.name}")
+            return
+        route = deepseek_agent_route(body, mode, config)
+        action = str(route.get("action", "unsupported"))
+        route_body = str(route.get("body") or body).strip()
+        if action == "chat":
+            append_chat_record(chat_id, user, message, config, "chat", display_text, saved_files)
+            send_message(token, chat_id, str(route.get("reply") or casual_chat_reply(display_text)))
+        elif action == "help":
+            send_message(token, chat_id, HELP_TEXT)
+        elif action == "status":
+            send_message(token, chat_id, f"大师兄 Telegram bot 正在运行。\n当前模式：{mode}\n后端：DeepSeek agent router + 本地安全工具。")
+        elif action == "note":
+            if not route_body:
+                send_message(token, chat_id, "要记什么？你可以说：记 今天调好了 556 laser。")
+                return
+            path = save_note(route_body, chat_id, user, config)
+            append_chat_record(chat_id, user, message, config, "note", route_body, saved_files)
+            send_message(token, chat_id, f"已记：{path.name}")
+        elif action == "allow_chat_id":
+            raw_target = route.get("target_chat_id")
+            try:
+                target = int(raw_target) if raw_target is not None else extract_chat_id(route_body or body)
+            except (TypeError, ValueError):
+                target = extract_chat_id(route_body or body)
+            if target is None:
+                send_message(token, chat_id, "我看到了白名单请求，但没读到 chat_id。发我类似：/allow 8004894761")
+                return
+            updated_config, changed = add_allowed_chat_id(config_path, target)
+            config.update(updated_config)
+            append_chat_record(chat_id, user, message, config, "admin", f"allow {target}", saved_files)
+            send_message(token, chat_id, f"已写进白名单：{target}" if changed else f"{target} 已经在白名单里了。")
+        elif action == "find_file":
+            matches = find_files_for_request(route_body or body, config)
+            append_chat_record(chat_id, user, message, config, "file_request", route_body or body)
+            if matches:
+                send_message(token, chat_id, f"找到 {len(matches)} 个相关文件，先发最相关的。")
+                for item in matches:
+                    send_document(token, chat_id, Path(item["path"]), f"{item.get('file_name', '')}\n{item.get('context', '')[:500]}")
+            else:
+                send_message(token, chat_id, "我没找到这个文件。你可以换个文件名、型号或关键词试试。")
+        elif action == "query_notebook":
+            if not route_body:
+                send_message(token, chat_id, "你想查什么？直接问我实验记录就行。")
+                return
+            append_chat_record(chat_id, user, message, config, "query", route_body, saved_files)
+            result = query_notebook(route_body, config)
+            detail_path = daily_person_dir(chat_id, user, config) / "query_html" / f"{datetime.now().astimezone().strftime('%H%M%S')}_{safe_name(route_body, 'query')}.html"
+            render_query_html(route_body, result, detail_path)
+            send_message(token, chat_id, short_query_reply(route_body, result))
+            if config.get("send_html_details", True) and has_clear_notebook_evidence(result):
+                send_document(token, chat_id, detail_path, "查询详情 HTML")
+        else:
+            reply = str(route.get("reply") or "这个动作我还没接到 Telegram 工具里。现在我能查 notebook、记笔记、找归档文件、加白名单。")
+            append_chat_record(chat_id, user, message, config, "unsupported", display_text, saved_files)
+            send_message(token, chat_id, reply)
     elif command == "chat":
         if mode == "record":
             path = save_note(display_text, chat_id, user, config)
@@ -1037,7 +1178,7 @@ def poll(token: str, config_path: Path, offset_path: Path, state_path: Path, onc
                 offset = max(offset, int(update["update_id"]) + 1)
                 if "message" in update:
                     try:
-                        handle_message(token, update["message"], config, state_path)
+                        handle_message(token, update["message"], config, config_path, state_path)
                     except Exception as exc:
                         chat_id = int((update.get("message", {}).get("chat") or {}).get("id", 0))
                         if chat_id:

@@ -104,8 +104,12 @@ The BotFather token must stay private at `/Volumes/ZZLab_AI/Key/telegram_bot_tok
 Supported commands:
 
 - `/id`: return the current chat ID for allow-list setup
-- `/ask QUESTION` or `查 QUESTION`: query the lab notebook
-- `/note TEXT` or `记 TEXT`: write a Telegram note into the private inbox
+- `/ask QUESTION` or `查 QUESTION`: query the lab notebook; normal messages default to query
+- `/note TEXT` or `记 TEXT`: write a Telegram note into the private daily Telegram folder
+- `开始记`: switch this chat into record mode; normal messages become notes
+- `停止记`: switch this chat back to query mode
 - `/status`, `/help`
 
-Do not enable notebook query or note write access for unknown chat IDs.
+Multiple Telegram accounts can access the bot by sending `/id` and then being added to `allowed_chat_ids` in the private config. Do not enable notebook query or note write access for unknown chat IDs.
+
+Telegram replies should stay brief. Query details are written to an HTML file and sent back as a Telegram document. Uploaded files are archived under `/Volumes/ZZLab_AI/YYYY-MM-DD/telegram文件和聊天记录/<person>_<chat_id>/`; PDF and text-like files are extracted into text/HTML previews, while binary files such as STEP or EXE are stored without content extraction.

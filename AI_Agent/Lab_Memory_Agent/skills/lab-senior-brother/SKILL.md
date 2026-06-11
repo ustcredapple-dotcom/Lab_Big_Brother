@@ -39,6 +39,8 @@ Then open `http://127.0.0.1:8765/`.
 
 The browser never receives the DeepSeek API key. The local Python server reads the key, queries the notebook index, calls DeepSeek when enabled, and returns the answer plus source HTML links.
 
+The UI has a `中文 / English` response-language toggle. Use it to force the final DeepSeek answer language regardless of whether the retrieved notebook evidence is Chinese or English.
+
 ## Data Sources
 
 For current paths and source hierarchy, read `references/data_sources.md` when needed.

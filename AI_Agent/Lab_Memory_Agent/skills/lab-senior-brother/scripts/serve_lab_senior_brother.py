@@ -43,6 +43,10 @@ HTML_PAGE = r"""<!DOCTYPE html>
     button:disabled { opacity: .55; cursor: wait; }
     label { color: var(--muted); font-size: 14px; }
     input[type="number"] { width: 64px; padding: 6px; border-radius: 8px; border: 1px solid #d4d4d8; }
+    .segmented { display: inline-flex; border: 1px solid #d4d4d8; border-radius: 10px; overflow: hidden; background: white; }
+    .segmented input { position: absolute; opacity: 0; pointer-events: none; }
+    .segmented span { display: inline-block; padding: 7px 11px; cursor: pointer; color: var(--muted); }
+    .segmented input:checked + span { background: var(--accent); color: white; }
     #status { color: var(--muted); font-size: 14px; }
     .answer { white-space: pre-wrap; line-height: 1.55; }
     .card { padding: 14px 16px; margin-top: 12px; }
@@ -67,6 +71,11 @@ HTML_PAGE = r"""<!DOCTYPE html>
     <div class="row">
       <button id="ask">查询</button>
       <label><input id="useDeepseek" type="checkbox" checked /> 用 DeepSeek 整理答案</label>
+      <span class="meta">回复语言</span>
+      <span class="segmented" role="group" aria-label="回复语言">
+        <label><input type="radio" name="answerLanguage" value="zh" checked /><span>中文</span></label>
+        <label><input type="radio" name="answerLanguage" value="en" /><span>English</span></label>
+      </span>
       <label>证据数 <input id="topK" type="number" value="5" min="1" max="10" /></label>
       <span id="status">就绪</span>
     </div>
@@ -125,6 +134,7 @@ async function run() {
       body: JSON.stringify({
         question: q,
         use_deepseek: document.getElementById("useDeepseek").checked,
+        answer_language: document.querySelector('input[name="answerLanguage"]:checked').value,
         top_k: Number(document.getElementById("topK").value || 5)
       })
     });
@@ -161,8 +171,16 @@ def read_deepseek_key(path: Path = KEY_FILE) -> str:
     raise RuntimeError(f"No DeepSeek sk-token found in {path}")
 
 
-def call_deepseek(question: str, search_result: dict, model: str = "deepseek-chat") -> tuple[str, dict]:
+def normalize_language(value: str) -> tuple[str, str]:
+    value = (value or "zh").strip().lower()
+    if value in {"en", "english"}:
+        return "en", "English"
+    return "zh", "Chinese"
+
+
+def call_deepseek(question: str, search_result: dict, model: str = "deepseek-chat", answer_language: str = "zh") -> tuple[str, dict]:
     key = read_deepseek_key()
+    language_code, language_name = normalize_language(answer_language)
     compact_evidence = []
     for item in search_result.get("evidence", []):
         compact_evidence.append(
@@ -181,6 +199,7 @@ def call_deepseek(question: str, search_result: dict, model: str = "deepseek-cha
 你是“实验室大师兄”，实验室 notebook 数据库管家。
 
 请根据检索证据回答用户问题。必须忠于证据，不要编造。
+无论证据原文是中文还是英文，最终回答必须使用 {language_name}。
 
 回答结构：
 1. 结论：之前是否做过，置信度如何。
@@ -197,7 +216,7 @@ def call_deepseek(question: str, search_result: dict, model: str = "deepseek-cha
     payload = {
         "model": model,
         "messages": [
-            {"role": "system", "content": "You are a careful lab notebook database steward. Answer in Chinese. Do not invent facts."},
+            {"role": "system", "content": f"You are a careful lab notebook database steward. Answer only in {language_name}. Do not invent facts."},
             {"role": "user", "content": prompt},
         ],
         "temperature": 0.1,
@@ -297,14 +316,15 @@ def make_handler(model: str):
                     self.send_json(400, {"error": "question is required"})
                     return
                 top_k = max(1, min(int(payload.get("top_k", 5)), 10))
+                answer_language = str(payload.get("answer_language", "zh"))
                 search_result = search(question, DISTILLATION, HTML_ROOT, top_k, include_source_snippets=True)
                 for item in search_result.get("evidence", []):
                     item["source_url"] = source_url_for(item.get("html", ""))
                 answer = ""
                 usage = {}
                 if payload.get("use_deepseek", True):
-                    answer, usage = call_deepseek(question, search_result, model=model)
-                self.send_json(200, {"answer": answer, "usage": usage, "search": search_result})
+                    answer, usage = call_deepseek(question, search_result, model=model, answer_language=answer_language)
+                self.send_json(200, {"answer": answer, "answer_language": normalize_language(answer_language)[0], "usage": usage, "search": search_result})
             except Exception as exc:
                 self.send_json(500, {"error": f"{type(exc).__name__}: {exc}"})
 

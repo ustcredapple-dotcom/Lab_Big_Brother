@@ -112,4 +112,4 @@ Supported commands:
 
 Multiple Telegram accounts can access the bot by sending `/id` and then being added to `allowed_chat_ids` in the private config. Do not enable notebook query or note write access for unknown chat IDs.
 
-Telegram replies should stay brief. Query details are written to an HTML file and sent back as a Telegram document. Uploaded files are archived under `/Volumes/ZZLab_AI/YYYY-MM-DD/telegram文件和聊天记录/<person>_<chat_id>/`; PDF and text-like files are extracted into text/HTML previews, while binary files such as STEP or EXE are stored without content extraction.
+Telegram replies should stay brief. Query details are written to an HTML file and sent back as a Telegram document. Any actual Telegram file upload is archived automatically under `/Volumes/ZZLab_AI/YYYY-MM-DD/telegram文件和聊天记录/<person>_<chat_id>/`, using its caption/current chat as context. PDF and text-like files are extracted into text/HTML previews, while binary files such as STEP or EXE are stored without content extraction.

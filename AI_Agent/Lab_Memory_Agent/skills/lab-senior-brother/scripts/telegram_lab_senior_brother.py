@@ -282,15 +282,28 @@ def short_query_reply(question: str, result: dict[str, Any]) -> str:
         return str(result["error"])
     evidence = result.get("evidence", [])
     if not evidence:
-        return f"没找到明确证据：{question}"
+        return f"我没在现有 notebook 里找到明确记录。详情我放在 HTML 里了。"
     top = evidence[0]
     facts = top.get("important_facts") or []
-    fact = f"\n要点：{facts[0]}" if facts else ""
-    return (
-        f"结论：{result.get('likely_done_before', 'unknown')}，置信度 {result.get('confidence', 'unknown')}。\n"
-        f"首条：{top.get('title', '')}（{top.get('score', 0):.1f}）{fact}\n"
-        "详情见 HTML。"
-    )
+    happened = top.get("what_happened") or []
+    decisions = top.get("decisions_or_conclusions") or []
+    bullets = []
+    candidates = [*happened, *decisions, *facts]
+    priority_words = ("解决", "正常", "成功", "结论", "滤波", "功放", "避免", "参数", "温度", "时间")
+    priority = [item for item in candidates if any(word in str(item) for word in priority_words)]
+    for item in [*happened[:2], *priority, *candidates]:
+        text = str(item).strip()
+        if text and text not in bullets:
+            bullets.append(text)
+        if len(bullets) >= 4:
+            break
+    if not bullets:
+        summary = top.get("summary") or "我找到了相关记录，但摘要比较短。"
+        return f"{summary}\n\n详情我放在 HTML 里了。"
+    lines = ["之前的记录里是这样做的："]
+    lines.extend(f"- {item}" for item in bullets)
+    lines.append("\n更完整的原文和来源我放在 HTML 里。")
+    return "\n".join(lines)
 
 
 def build_file_index(config: dict[str, Any]) -> list[dict[str, Any]]:
@@ -606,10 +619,18 @@ def handle_message(token: str, message: dict[str, Any], config: dict[str, Any], 
 
     saved_files = save_message_files(token, message, chat_id, user, config)
     if saved_files:
-        append_chat_record(chat_id, user, message, config, "file", caption, saved_files)
-        if not text and not caption:
-            send_message(token, chat_id, f"收到文件，已归档 {len(saved_files)} 个。")
-            return
+        context = caption or text
+        append_chat_record(chat_id, user, message, config, "file", context, saved_files)
+        extracted = sum(1 for item in saved_files if item.get("text_extract"))
+        metadata_only = sum(1 for item in saved_files if not item.get("text_extract"))
+        detail = []
+        if extracted:
+            detail.append(f"{extracted} 个已抽文本")
+        if metadata_only:
+            detail.append(f"{metadata_only} 个仅存元数据")
+        suffix = f"（{'，'.join(detail)}）" if detail else ""
+        send_message(token, chat_id, f"收到文件，已按当前上下文自动归档 {len(saved_files)} 个{suffix}。")
+        return
 
     if command == "help":
         send_message(token, chat_id, HELP_TEXT)

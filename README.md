@@ -69,7 +69,7 @@ python3 AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/telegram_lab
 
 Store the BotFather token privately at `/Volumes/ZZLab_AI/Key/telegram_bot_token.txt`. The bot supports `/id`, `/ask`, `/note`, `/status`, and `/help`; lab access is gated by chat ID allow-list in the private Telegram bot config.
 
-Telegram behavior is intentionally short-form: normal messages query first, `记` or `/note` writes a note, `开始记` switches that chat into record mode, and `停止记` switches back to query mode. Query replies are concise and can include an HTML detail file. Uploaded files are archived by date and sender under private folders; text-like files, Markdown, HTML, CSV/JSON, and PDF files get text/HTML previews, while binary engineering files such as STEP or EXE are stored as metadata-only attachments.
+Telegram behavior is intentionally short-form: normal messages query first, `记` or `/note` writes a note, `开始记` switches that chat into record mode, and `停止记` switches back to query mode. Query replies are concise and can include an HTML detail file. Any actual uploaded file is archived automatically by date and sender, using the caption/current chat as context; text-like files, Markdown, HTML, CSV/JSON, and PDF files get text/HTML previews, while binary engineering files such as STEP or EXE are stored as metadata-only attachments.
 
 ## Quick Start
 

@@ -567,22 +567,27 @@ def save_message_files(token: str, message: dict[str, Any], chat_id: int, user: 
     return saved
 
 
+def is_help_request(text: str) -> bool:
+    stripped = text.strip()
+    lowered = stripped.casefold()
+    normalized = re.sub(r"[\s，。！？,.!?：:；;、]+", "", lowered)
+    normalized = re.sub(r"^(大师兄|实验室大师兄|bot|机器人|zzlabbigbrother)+", "", normalized)
+    normalized = re.sub(r"^(你|您|这个|这个bot|这个机器人)+", "", normalized)
+    if lowered in {"/help", "help", "commands"}:
+        return True
+    if re.fullmatch(r"(怎么用|如何使用|使用说明|帮助|命令|指令|有哪些指令|有什么指令|能干什么|可以干什么)", normalized):
+        return True
+    help_patterns = (
+        r"(有哪些|有什么|支持|可用|所有).{0,6}(指令|命令|功能)",
+        r"(指令|命令|功能).{0,6}(列表|说明|帮助)",
+        r"(怎么|如何).{0,8}(使用|操作).{0,8}(大师兄|bot|机器人|telegram|入口)",
+    )
+    return any(re.search(pattern, lowered) for pattern in help_patterns)
+
+
 def parse_command(text: str) -> tuple[str, str]:
     stripped = text.strip()
     lowered = stripped.casefold()
-    help_phrases = (
-        "有哪些指令",
-        "有什么指令",
-        "怎么用",
-        "使用说明",
-        "帮助",
-        "命令",
-        "指令",
-        "help",
-        "commands",
-    )
-    if any(phrase in lowered for phrase in help_phrases):
-        return "help", ""
     if lowered in {"/开始记", "开始记", "开始记录", "/record_on"}:
         return "record_on", ""
     if lowered in {"/停止记", "停止记", "停止记录", "/record_off"}:
@@ -599,6 +604,8 @@ def parse_command(text: str) -> tuple[str, str]:
         return "id", ""
     if lowered.startswith("/status"):
         return "status", ""
+    if is_help_request(stripped):
+        return "help", ""
     if stripped.startswith("查"):
         return "ask", stripped[1:].strip()
     if stripped.startswith("记"):

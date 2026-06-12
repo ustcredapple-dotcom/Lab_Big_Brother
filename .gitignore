@@ -16,6 +16,7 @@ Key/
 # Local credentials and sync state
 AI_Agent/Lab_Memory_Agent/config/*
 !AI_Agent/Lab_Memory_Agent/config/onenote_sync.example.json
+!AI_Agent/Lab_Memory_Agent/config/gmail_email_ingest.example.json
 AI_Agent/Lab_Memory_Agent/indices/
 AI_Agent/Lab_Memory_Agent/logs/
 

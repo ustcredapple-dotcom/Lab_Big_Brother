@@ -12,6 +12,7 @@ REMOTE = "origin"
 BRANCH = "main"
 MAX_PUBLIC_FILE_BYTES = 10 * 1024 * 1024
 ALLOWED_PRIVATE_TREE_EXCEPTIONS = {
+    "AI_Agent/Lab_Memory_Agent/config/gmail_email_ingest.example.json",
     "AI_Agent/Lab_Memory_Agent/config/onenote_sync.example.json",
     "AI_Agent/Lab_Memory_Agent/entries/2026-06-11-auto-work-handoff.md",
     "AI_Agent/Lab_Memory_Agent/entries/2026-06-11-example.md",

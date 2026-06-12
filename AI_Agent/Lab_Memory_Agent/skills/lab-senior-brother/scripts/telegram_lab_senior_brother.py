@@ -373,6 +373,8 @@ def evidence_from_page(page: dict[str, Any], evidence_id: int) -> dict[str, Any]
 def retrieval_aliases(question: str) -> list[str]:
     lowered = question.casefold()
     aliases = []
+    if ("cavity" in lowered or "腔" in lowered) and ("finesse" in lowered or "精细" in lowered or "细度" in lowered):
+        aliases.append("optical cavity finesse 精细度 Out-of-vacuum optical cavity test Cavity mirror Finesse")
     if "真空" in lowered and "烤" in lowered:
         aliases.append("真空烘烤")
     if "电脑" in lowered or "计算机" in lowered:
@@ -395,6 +397,7 @@ def deepseek_select_evidence(question: str, pages: list[dict[str, Any]], config:
                 "用户常用实验室口语、倒装、省略和近义说法提问；你要先把口语归一化再找证据。"
                 "例如“烤过真空/烤真空/真空烤过吗”应理解为“真空烘烤做过吗”；"
                 "“买了几张台子”可理解为“光学平台采购数量”；“电脑有几台”可理解为“Lab computers 数量”。"
+                "用户泛问“cavity/腔”的finesse/精细度时，可使用 optical cavity 或 cavity mirror 测试页作答，但要在 reason 中说明具体是哪种 cavity。"
                 "如果目录里没有直接或明确同义回答用户问题的页面，必须说没有。"
                 "不要因为单个泛词或同音字相似就选择页面，比如“电脑”和“电气/光学平台/温控”不是同一件事。"
                 "只输出 JSON。"
@@ -431,11 +434,11 @@ def deepseek_answer_from_evidence(question: str, evidence: list[dict[str, Any]],
                 "title": item.get("title"),
                 "html": item.get("html"),
                 "summary": item.get("summary"),
-                "what_happened": first_items(item.get("what_happened"), 8),
-                "important_facts": first_items(item.get("important_facts"), 10),
-                "decisions_or_conclusions": first_items(item.get("decisions_or_conclusions"), 6),
-                "open_questions_or_next_steps": first_items(item.get("open_questions_or_next_steps"), 4),
-                "people_organizations_equipment": first_items(item.get("people_organizations_equipment"), 10),
+                "what_happened": first_items(item.get("what_happened"), 20),
+                "important_facts": first_items(item.get("important_facts"), 20),
+                "decisions_or_conclusions": first_items(item.get("decisions_or_conclusions"), 10),
+                "open_questions_or_next_steps": first_items(item.get("open_questions_or_next_steps"), 8),
+                "people_organizations_equipment": first_items(item.get("people_organizations_equipment"), 12),
             }
         )
     messages = [
@@ -445,6 +448,7 @@ def deepseek_answer_from_evidence(question: str, evidence: list[dict[str, Any]],
                 "你是“实验室大师兄”。用 Telegram 适合的短回复回答，中文，自然，不要写“结论/置信度/score”。"
                 "必须忠于证据。如果证据无法直接回答，reply 必须是：师兄我也不知道，notebook 里没找到明确记录。"
                 "有证据时最多 6 行，先直接回答，再给关键做法/数量/参数。"
+                "如果同一证据里有多个测量值，优先给最新、最终、最明确的值，同时可用一句话提到早期/采购规格。"
                 "不要主动输出密码、token、密钥、序列号等敏感凭据，即使证据里出现了。只输出 JSON。"
             ),
         },

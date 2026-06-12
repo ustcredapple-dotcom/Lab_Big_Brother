@@ -1,0 +1,13 @@
+{
+  "email_address": "ultracoldhku@gmail.com",
+  "imap_host": "imap.gmail.com",
+  "imap_port": 993,
+  "mailbox": "INBOX",
+  "password_file": "/Volumes/ZZLab_AI/Key/gmail_app_password.txt",
+  "daily_root": "/Volumes/ZZLab_AI",
+  "email_folder_name": "email文件和邮件记录",
+  "state_file": "/Volumes/ZZLab_AI/Document/Lab_Notebook_Processing/email_ingest_state.json",
+  "only_unseen": true,
+  "max_messages_per_run": 50,
+  "mark_seen_after_archive": false
+}

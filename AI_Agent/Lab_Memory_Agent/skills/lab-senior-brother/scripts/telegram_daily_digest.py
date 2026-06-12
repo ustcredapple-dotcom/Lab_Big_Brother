@@ -17,6 +17,7 @@ DEEPSEEK_KEY = ZZLAB_ROOT / "Key/Deepseek Key.txt"
 MEMORY_KINDS = {"note", "file"}
 
 SCRIPT_DIR = Path(__file__).resolve().parents[3] / "scripts/notebook_pipeline"
+CHANNEL_SECTION = "Telegram Records"
 
 
 def read_json(path: Path, default: Any) -> Any:
@@ -69,6 +70,43 @@ def read_text_extracts(records: list[dict[str, Any]], limit: int = 12000) -> str
             if remaining <= 0:
                 return "".join(parts)
     return "".join(parts)
+
+
+def compact_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    compact = []
+    for index, item in enumerate(records, start=1):
+        files = [
+            {
+                "name": Path(file_item.get("path", "")).name,
+                "path": file_item.get("path", ""),
+                "mime_type": file_item.get("mime_type", ""),
+                "text_preview": file_item.get("text_preview", ""),
+            }
+            for file_item in item.get("files", [])
+        ]
+        compact.append(
+            {
+                "id": f"telegram-{index}",
+                "time": item.get("created_at"),
+                "person": item.get("_person_folder"),
+                "kind": item.get("kind"),
+                "text": item.get("text", "")[:3000],
+                "files": files,
+            }
+        )
+    return compact
+
+
+def record_attachments(records: list[dict[str, Any]]) -> list[str]:
+    attachments = []
+    seen = set()
+    for item in records:
+        for file_item in item.get("files", []):
+            path = file_item.get("path", "")
+            if path and path not in seen:
+                seen.add(path)
+                attachments.append(path)
+    return attachments
 
 
 def render_html(day: date, root: Path, records: list[dict[str, Any]], output: Path) -> None:
@@ -275,10 +313,47 @@ def main() -> None:
     records = load_records(root) if root.exists() else []
     memory_records = [item for item in records if item.get("kind") in MEMORY_KINDS]
     render_html(day, root, records, output)
-    distilled = deepseek_distill(day, memory_records, read_text_extracts(memory_records))
+    topic_result = {"groups": 0, "pages": [], "removed_channel_page": False}
     if memory_records:
-        upsert_distillation(day, output, memory_records, distilled)
-    print(json.dumps({"date": day.isoformat(), "records": len(records), "memory_records": len(memory_records), "html": str(output), "distilled": bool(memory_records)}, ensure_ascii=False))
+        import topic_distillation
+
+        topic_result = topic_distillation.upsert_topic_supplements(
+            source="telegram",
+            day=day,
+            html_path=output,
+            compact_records=compact_records(memory_records),
+            text_extracts=read_text_extracts(memory_records),
+            attachments=record_attachments(memory_records),
+            channel_section=CHANNEL_SECTION,
+        )
+    else:
+        import topic_distillation
+
+        topic_result = topic_distillation.upsert_topic_supplements(
+            source="telegram",
+            day=day,
+            html_path=output,
+            compact_records=[],
+            text_extracts="",
+            attachments=[],
+            channel_section=CHANNEL_SECTION,
+        )
+    print(
+        json.dumps(
+            {
+                "date": day.isoformat(),
+                "records": len(records),
+                "memory_records": len(memory_records),
+                "html": str(output),
+                "distilled": bool(memory_records),
+                "topic_groups": topic_result.get("groups", 0),
+                "topic_pages": topic_result.get("pages", []),
+                "removed_channel_page": topic_result.get("removed_channel_page", False),
+                "pruned_channel_section": topic_result.get("pruned_channel_section", False),
+            },
+            ensure_ascii=False,
+        )
+    )
 
 
 if __name__ == "__main__":

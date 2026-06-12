@@ -15,6 +15,7 @@ DISTILLATION_HTML = PROCESSING / "html_deepseek_distilled/DEEPSEEK_DISTILLATION.
 DEFAULT_FOLDER_NAME = "email文件和邮件记录"
 DEEPSEEK_KEY = ZZLAB_ROOT / "Key/Deepseek Key.txt"
 SCRIPT_DIR = Path(__file__).resolve().parents[3] / "scripts/notebook_pipeline"
+CHANNEL_SECTION = "Email Records"
 
 
 def read_json(path: Path, default: Any) -> Any:
@@ -77,6 +78,44 @@ def read_text_extracts(records: list[dict[str, Any]], limit: int = 40000) -> str
         if remaining <= 0:
             break
     return "".join(parts)
+
+
+def compact_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    compact = []
+    for index, item in enumerate(records, start=1):
+        attachments = [
+            {
+                "filename": attachment.get("filename"),
+                "path": attachment.get("path"),
+                "mime_type": attachment.get("mime_type"),
+                "text_preview": attachment.get("text_preview", ""),
+            }
+            for attachment in item.get("attachments", [])
+        ]
+        compact.append(
+            {
+                "id": f"email-{index}",
+                "date": item.get("date"),
+                "sender": item.get("from"),
+                "subject": item.get("subject"),
+                "text_preview": (item.get("text_preview") or "")[:3000],
+                "html_preview": item.get("html_preview"),
+                "attachments": attachments,
+            }
+        )
+    return compact
+
+
+def record_attachments(records: list[dict[str, Any]]) -> list[str]:
+    attachments = []
+    seen = set()
+    for item in records:
+        for attachment in item.get("attachments", []):
+            path = attachment.get("path", "")
+            if path and path not in seen:
+                seen.add(path)
+                attachments.append(path)
+    return attachments
 
 
 def render_html(day: date, root: Path, records: list[dict[str, Any]], output: Path) -> None:
@@ -333,13 +372,46 @@ def main() -> None:
     output = root / f"email_records_{day.isoformat()}.html"
     records = load_records(root) if root.exists() else []
     render_html(day, root, records, output)
-    distilled = deepseek_distill(day, records, read_text_extracts(records)) if records else local_distill(day, records)
+    topic_result = {"groups": 0, "pages": [], "removed_channel_page": False}
     if records:
-        upsert_distillation(day, output, records, distilled)
-        removed = False
+        import topic_distillation
+
+        topic_result = topic_distillation.upsert_topic_supplements(
+            source="email",
+            day=day,
+            html_path=output,
+            compact_records=compact_records(records),
+            text_extracts=read_text_extracts(records),
+            attachments=record_attachments(records),
+            channel_section=CHANNEL_SECTION,
+        )
     else:
-        removed = remove_distillation_page(day)
-    print(json.dumps({"date": day.isoformat(), "records": len(records), "html": str(output), "distilled": bool(records), "removed_empty_page": removed}, ensure_ascii=False))
+        import topic_distillation
+
+        topic_result = topic_distillation.upsert_topic_supplements(
+            source="email",
+            day=day,
+            html_path=output,
+            compact_records=[],
+            text_extracts="",
+            attachments=[],
+            channel_section=CHANNEL_SECTION,
+        )
+    print(
+        json.dumps(
+            {
+                "date": day.isoformat(),
+                "records": len(records),
+                "html": str(output),
+                "distilled": bool(records),
+                "topic_groups": topic_result.get("groups", 0),
+                "topic_pages": topic_result.get("pages", []),
+                "removed_channel_page": topic_result.get("removed_channel_page", False),
+                "pruned_channel_section": topic_result.get("pruned_channel_section", False),
+            },
+            ensure_ascii=False,
+        )
+    )
 
 
 if __name__ == "__main__":

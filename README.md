@@ -81,7 +81,24 @@ Store the BotFather token privately at `/Volumes/ZZLab_AI/Key/telegram_bot_token
 
 Telegram now uses a small local agent backend. Explicit commands still run directly, while other normal messages go through a Qwen router that selects only from a safe local tool registry: chat, notebook query, note capture, archived-file lookup, allow-list admin, help, and status. It does not expose arbitrary shell or filesystem access. Greetings and light social messages get a natural “大师兄已就位” style reply; lab questions query the notebook; `记` or `/note` writes a note; `开始记` switches that chat into record mode; and `停止记` switches back to query mode. Only durable records are kept long term by default: notes, uploaded files, mode changes, and admin actions. Ordinary queries, greetings, file requests, and unsupported requests are not persisted into the daily records; query-detail HTML is generated temporarily for sending and then discarded. Query replies use Qwen at runtime to inspect the distilled notebook directory, select evidence pages, and write the short answer; if Qwen finds no direct evidence, the bot should say it does not know instead of forcing an unrelated result. Any actual uploaded file, including Telegram photos/images, is archived automatically by date and sender, using the caption/current chat as context; text-like files, Markdown, HTML, CSV/JSON, and PDF files get text/HTML previews, while images get Qwen vision previews, and binary engineering files such as STEP or EXE are stored as metadata-only attachments.
 
-Telegram and email daily digests keep their raw archives by source, but Qwen memory indexing is topic-first. The nightly digest first filters out obvious verification codes, account-login/security noise, newsletters, advertisements, and promotional messages; when the rule-based filter is unsure, Qwen decides conservatively and keeps anything that may be lab-relevant. Kept records are classified against existing notebook sections such as equipment purchasing, ARTIQ, and the Yb experiment, then written as supplemental pages under those topics. Only records that cannot be confidently matched go to `Unsorted Communication Records`; `Telegram Records` and `Email Records` are provenance channels, not long-term topic buckets.
+Telegram, Lark, and email daily digests keep their raw archives by source, but Qwen memory indexing is topic-first. The nightly digest first filters out obvious verification codes, account-login/security noise, newsletters, advertisements, and promotional messages; when the rule-based filter is unsure, Qwen decides conservatively and keeps anything that may be lab-relevant. Kept records are classified against existing notebook sections such as equipment purchasing, ARTIQ, and the Yb experiment, then written as supplemental pages under those topics. Only records that cannot be confidently matched go to `Unsorted Communication Records`; `Telegram Records`, `Lark Records`, and `Email Records` are provenance channels, not long-term topic buckets.
+
+Lark entrypoint:
+
+```bash
+python3 AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/lark_lab_senior_brother.py
+python3 AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/lark_daily_digest.py
+```
+
+The Lark account uses the international Lark platform, so the default OpenAPI domain is `https://open.larksuite.com`. Store App ID/App Secret and event encryption settings privately under `/Volumes/ZZLab_AI/Key/`; the runtime config lives at `/Volumes/ZZLab_AI/Document/Lab_Notebook_Processing/lark_bot_config.json`, and the public example is `AI_Agent/Lab_Memory_Agent/config/lark_bot.example.json`.
+
+Lark uses a WebSocket event connection, so it does not need ngrok. Once the bot is added to a group, it records delivered group messages by default under `/Volumes/ZZLab_AI/YYYY-MM-DD/lark文档和消息记录/`. To receive every message in a group instead of only direct mentions, the Lark app must be granted the official scope `Read all messages in associated group chat` and subscribe to the `Receive message` event. In group chats the bot stays quiet unless mentioned with `@大师兄` or called with commands such as `/ask`, `/note`, `/help`, `/status`, or `/id`. In private chat it can reply directly. Uploaded files and images are archived like Telegram files: text-like files and PDFs get extracts, images get Qwen vision previews, and binary engineering files are stored as metadata-only attachments. The nightly Lark digest is topic-first and should supplement existing notebook sections instead of creating a durable `Lark Records` topic.
+
+Install runtime dependencies with:
+
+```bash
+python3 -m pip install -r AI_Agent/Lab_Memory_Agent/requirements.txt
+```
 
 Gmail forwarding entrypoint:
 

@@ -28,6 +28,7 @@ SHARED_FILES = [
     "PROJECT_HANDOFF.md",
     "Document/AI_Agent_Migration_2026-06-11/conversation_records/WORK_LOG.md",
     "AI_Agent/Lab_Memory_Agent/manifest.yaml",
+    "AI_Agent/Lab_Memory_Agent/requirements.txt",
     "AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/SKILL.md",
     "AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/references/data_sources.md",
     "AI_Agent/Lab_Memory_Agent/scripts/notebook_pipeline/README.md",
@@ -38,6 +39,8 @@ SHARED_FILES = [
     "AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/serve_lab_senior_brother.py",
     "AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/telegram_lab_senior_brother.py",
     "AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/telegram_daily_digest.py",
+    "AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/lark_lab_senior_brother.py",
+    "AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/lark_daily_digest.py",
     "AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/email_ingest.py",
     "AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/email_daily_digest.py",
     "AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/topic_distillation.py",
@@ -46,6 +49,7 @@ SHARED_FILES = [
     "AI_Agent/Lab_Memory_Agent/skills/auto-handoff/scripts/update_handoff.py",
     "AI_Agent/Lab_Memory_Agent/skills/auto-handoff/scripts/sync_github.py",
     "AI_Agent/Lab_Memory_Agent/config/gmail_email_ingest.example.json",
+    "AI_Agent/Lab_Memory_Agent/config/lark_bot.example.json",
 ]
 
 LOCAL_FILES = [
@@ -54,6 +58,8 @@ LOCAL_FILES = [
     Path("/Users/wjj/Library/LaunchAgents/com.zzlab.email-daily-digest.plist"),
     Path("/Users/wjj/Library/LaunchAgents/com.zzlab.lab-notebook-daily-update.plist"),
     Path("/Users/wjj/Library/LaunchAgents/com.zzlab.telegram-daily-digest.plist"),
+    Path("/Users/wjj/Library/LaunchAgents/com.zzlab.lark-lab-senior-brother.plist"),
+    Path("/Users/wjj/Library/LaunchAgents/com.zzlab.lark-daily-digest.plist"),
 ]
 
 MAX_FILE_CHARS = 18000
@@ -243,7 +249,7 @@ def upsert_distillation(html_path: Path, md_path: Path, json_path: Path, manifes
         "decisions_or_conclusions": as_items(distilled.get("design_principles")) + as_items(distilled.get("safety_and_privacy_boundaries"))[:8],
         "open_questions_or_next_steps": as_items(distilled.get("next_steps")) + as_items(distilled.get("known_limitations"))[:6],
         "people_organizations_equipment": ["ZZLab", "实验室大师兄", "Qwen3.7-Plus", "Telegram Bot", "Gmail", "OneNote HTML notebook"],
-        "tags": list(dict.fromkeys(as_items(distilled.get("tags")) + ["lab-big-brother", "self-documentation", "architecture", "qwen", "telegram", "gmail"])),
+        "tags": list(dict.fromkeys(as_items(distilled.get("tags")) + ["lab-big-brother", "self-documentation", "architecture", "qwen", "telegram", "lark", "gmail"])),
         "confidence_notes": as_items(distilled.get("confidence_notes"))
         + ["Generated from project code, README/SKILL docs, PROJECT_HANDOFF, work-log tail, and local LaunchAgent plists. Secrets were not read."],
         "important_assets_or_attachments": [str(md_path), str(html_path), str(json_path), str(manifest_path)] + as_items(distilled.get("important_assets_or_attachments")),

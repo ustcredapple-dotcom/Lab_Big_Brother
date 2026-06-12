@@ -20,7 +20,7 @@ if str(SCRIPT_DIR) not in sys.path:
 
 import llm_provider  # noqa: E402
 
-CHANNEL_SECTIONS = {"Telegram Records", "Email Records"}
+CHANNEL_SECTIONS = {"Telegram Records", "Email Records", "Lark Records"}
 UNSORTED_SECTION = "Unsorted Communication Records"
 NOISE_TAG = "filtered-noise"
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import email.utils
+import fcntl
 import hashlib
 import html
 import imaplib
@@ -72,6 +73,11 @@ def default_config() -> dict[str, Any]:
         "only_unseen": True,
         "max_messages_per_run": 50,
         "mark_seen_after_archive": False,
+        "ignored_senders": [
+            "google-noreply@google.com",
+            "no-reply@accounts.google.com",
+            "no-reply@google.com",
+        ],
     }
 
 
@@ -114,6 +120,15 @@ def normalize_addresses(value: str | None) -> str:
     if not value:
         return ""
     return ", ".join(email.utils.formataddr(pair) for pair in email.utils.getaddresses([value]))
+
+
+def first_email_address(value: str | None) -> str:
+    if not value:
+        return ""
+    pairs = email.utils.getaddresses([value])
+    if not pairs:
+        return value.strip().casefold()
+    return (pairs[0][1] or pairs[0][0]).strip().casefold()
 
 
 def sender_folder_name(message: Message) -> str:
@@ -399,6 +414,8 @@ def ingest(config_path: Path, dry_run: bool = False) -> dict[str, Any]:
     processed_message_ids = set(str(item) for item in state.get("processed_message_ids", []))
 
     archived: list[dict[str, Any]] = []
+    ignored = 0
+    ignored_senders = {str(item).strip().casefold() for item in config.get("ignored_senders", []) if str(item).strip()}
     email_address = config.get("email_address") or DEFAULT_EMAIL
     with imaplib.IMAP4_SSL(config.get("imap_host", "imap.gmail.com"), int(config.get("imap_port", 993))) as connection:
         connection.login(email_address, password)
@@ -418,6 +435,13 @@ def ingest(config_path: Path, dry_run: bool = False) -> dict[str, Any]:
                 continue
             message = email.message_from_bytes(raw, policy=policy.default)
             message_id = str(message.get("message-id", "")).strip()
+            sender_address = first_email_address(str(message.get("from", "")))
+            if sender_address in ignored_senders:
+                ignored += 1
+                processed_uids.add(uid)
+                if message_id:
+                    processed_message_ids.add(message_id)
+                continue
             if message_id and message_id in processed_message_ids:
                 processed_uids.add(uid)
                 continue
@@ -437,7 +461,20 @@ def ingest(config_path: Path, dry_run: bool = False) -> dict[str, Any]:
     state["updated_at"] = now_iso()
     if not dry_run:
         write_json(state_path, state)
-    return {"skipped": False, "archived": len(archived), "records": archived}
+    return {"skipped": False, "archived": len(archived), "ignored": ignored, "records": archived}
+
+
+def ingest_with_lock(config_path: Path, dry_run: bool = False) -> dict[str, Any]:
+    config = load_config(config_path)
+    state_path = Path(config.get("state_file") or str(DEFAULT_STATE))
+    lock_path = state_path.with_suffix(state_path.suffix + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("w", encoding="utf-8") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return {"skipped": True, "reason": "already_running"}
+        return ingest(config_path, dry_run)
 
 
 def main() -> None:
@@ -446,7 +483,7 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     try:
-        print(json.dumps(ingest(args.config, args.dry_run), ensure_ascii=False, default=str))
+        print(json.dumps(ingest_with_lock(args.config, args.dry_run), ensure_ascii=False, default=str))
     except imaplib.IMAP4.error as exc:
         print(json.dumps({"skipped": True, "reason": "imap_auth_or_access_error", "error": str(exc)}, ensure_ascii=False))
         sys.exit(2)

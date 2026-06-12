@@ -9,5 +9,10 @@
   "state_file": "/Volumes/ZZLab_AI/Document/Lab_Notebook_Processing/email_ingest_state.json",
   "only_unseen": true,
   "max_messages_per_run": 50,
-  "mark_seen_after_archive": false
+  "mark_seen_after_archive": false,
+  "ignored_senders": [
+    "google-noreply@google.com",
+    "no-reply@accounts.google.com",
+    "no-reply@google.com"
+  ]
 }

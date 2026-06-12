@@ -126,6 +126,6 @@ python /Volumes/ZZLab_AI/AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scr
 
 The private mailbox is `ultracoldhku@gmail.com`. Store the Gmail app password only at `/Volumes/ZZLab_AI/Key/gmail_app_password.txt`, one line, no spaces. The private runtime config is `/Volumes/ZZLab_AI/Document/Lab_Notebook_Processing/email_ingest_config.json`; the public example is `AI_Agent/Lab_Memory_Agent/config/gmail_email_ingest.example.json`.
 
-The ingester reads new unread IMAP messages, archives raw `.eml`, readable HTML, body text, attachments, and extracted text under `/Volumes/ZZLab_AI/YYYY-MM-DD/email文件和邮件记录/<sender>/`. Text-like files and PDFs are extracted for future distillation; binary files are stored as metadata-only attachments. The daily digest writes a private daily HTML overview and upserts the `"Email Records"` section into `DEEPSEEK_DISTILLATION.json/html`.
+The ingester reads new unread IMAP messages, skips known Google account-notification senders by default, archives raw `.eml`, readable HTML, body text, attachments, and extracted text under `/Volumes/ZZLab_AI/YYYY-MM-DD/email文件和邮件记录/<sender>/`. Text-like files and PDFs are extracted for future distillation; binary files are stored as metadata-only attachments. The daily digest writes a private daily HTML overview and upserts the `"Email Records"` section into `DEEPSEEK_DISTILLATION.json/html`.
 
 If the app password file is missing, the ingester should exit cleanly with `missing_password_file` instead of failing or blocking other services. Never log or commit the Gmail app password.

@@ -281,6 +281,46 @@ def upsert_distillation(day: date, html_path: Path, records: list[dict[str, Any]
         pass
 
 
+def remove_distillation_page(day: date) -> bool:
+    if not DISTILLATION.exists():
+        return False
+    data = read_json(DISTILLATION, {"sections": []})
+    section_name = "Email Records"
+    target_title = f"Email Records {day.isoformat()}"
+    removed = False
+    for section in data.get("sections", []):
+        if section.get("section") != section_name:
+            continue
+        pages = section.setdefault("pages", [])
+        kept = [page for page in pages if page.get("title") != target_title]
+        if len(kept) != len(pages):
+            section["pages"] = kept
+            section["page_count"] = len(kept)
+            removed = True
+    if not removed:
+        return False
+    data["generated_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
+    data.setdefault("incremental_updates", []).append(
+        {
+            "detected_at": data["generated_at"],
+            "email_records_day": day.isoformat(),
+            "records": 0,
+            "action": "removed_empty_email_records_page",
+        }
+    )
+    write_json(DISTILLATION, data)
+    try:
+        import sys
+
+        sys.path.insert(0, str(SCRIPT_DIR))
+        import distill_html_with_deepseek as deepseek  # type: ignore
+
+        DISTILLATION_HTML.write_text(deepseek.render_html(data), encoding="utf-8")
+    except Exception:
+        pass
+    return True
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Distill daily Gmail records into lab memory.")
     parser.add_argument("--date", default="")
@@ -296,7 +336,10 @@ def main() -> None:
     distilled = deepseek_distill(day, records, read_text_extracts(records)) if records else local_distill(day, records)
     if records:
         upsert_distillation(day, output, records, distilled)
-    print(json.dumps({"date": day.isoformat(), "records": len(records), "html": str(output), "distilled": bool(records)}, ensure_ascii=False))
+        removed = False
+    else:
+        removed = remove_distillation_page(day)
+    print(json.dumps({"date": day.isoformat(), "records": len(records), "html": str(output), "distilled": bool(records), "removed_empty_page": removed}, ensure_ascii=False))
 
 
 if __name__ == "__main__":

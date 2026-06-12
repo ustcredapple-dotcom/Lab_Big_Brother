@@ -49,7 +49,7 @@ SHARED_FILES = [
     "AI_Agent/Lab_Memory_Agent/skills/auto-handoff/scripts/update_handoff.py",
     "AI_Agent/Lab_Memory_Agent/skills/auto-handoff/scripts/sync_github.py",
     "AI_Agent/Lab_Memory_Agent/config/gmail_email_ingest.example.json",
-    "AI_Agent/Lab_Memory_Agent/config/lark_bot.example.json",
+    "AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/references/lark_bot.example.json",
 ]
 
 LOCAL_FILES = [

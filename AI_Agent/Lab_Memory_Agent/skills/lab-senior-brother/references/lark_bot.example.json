@@ -1,0 +1,20 @@
+{
+  "platform": "lark",
+  "base_url": "https://open.larksuite.com",
+  "allowed_chat_ids": [],
+  "allowed_user_ids": [],
+  "admin_open_ids": [],
+  "allow_registration_mode": true,
+  "default_top_k": 5,
+  "query_timeout_seconds": 60,
+  "send_html_details": true,
+  "llm_model": "qwen3.7-plus",
+  "daily_root": "/Volumes/ZZLab_AI",
+  "lark_folder_name": "lark文档和消息记录",
+  "notes_inbox": "/Volumes/ZZLab_AI/AI_Agent/Lab_Memory_Agent/inbox/lark",
+  "persistent_record_kinds": ["chat", "note", "file", "mode", "admin"],
+  "digest_memory_kinds": ["chat", "note", "file"],
+  "respond_in_group_only_when_mentioned": true,
+  "bot_mention_names": ["大师兄", "实验室大师兄", "ZZLab Big Brother", "Lab Big Brother"],
+  "record_all_joined_chats": true
+}

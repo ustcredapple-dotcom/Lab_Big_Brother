@@ -32,7 +32,9 @@ python3 AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/query_lab_no
   --include-source-snippets
 ```
 
-Local web UI:
+Local web UI retired by default:
+
+The browser UI script still exists for one-off local debugging, but the routine web entrypoint is stopped/disabled. Use Codex, Telegram, or Gmail forwarding for normal interaction. Do not expose the web UI through ngrok unless the user explicitly asks to re-enable it.
 
 ```bash
 python3 AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/serve_lab_senior_brother.py
@@ -42,7 +44,7 @@ Then open `http://127.0.0.1:8765/`. The browser talks to a local Python server; 
 
 The UI includes a `中文 / English` toggle for the final answer language.
 
-Public sharing can be enabled by running the same local server behind an ngrok tunnel. Keep the tunnel protected with Basic Auth and store runtime credentials only in local private configuration, never in Git:
+Public sharing can be re-enabled only by explicit request, by running the same local server behind an ngrok tunnel. Keep the tunnel protected with Basic Auth and store runtime credentials only in local private configuration, never in Git:
 
 ```bash
 python3 AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/serve_lab_senior_brother.py \
@@ -52,6 +54,14 @@ ngrok http 8765
 ```
 
 The public URL may change when ngrok is restarted unless a reserved domain is configured. Anyone with the URL and Basic Auth credentials can query the notebook interface and may consume Qwen API quota.
+
+Self-knowledge refresh:
+
+```bash
+python3 AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/update_self_knowledge.py
+```
+
+After significant updates and handoff refreshes, run this script so 大师兄 re-distills its current code, docs, handoff, and service configuration into the private lab documentation and the `Lab Big Brother System` section of the notebook index.
 
 Nightly notebook maintenance:
 

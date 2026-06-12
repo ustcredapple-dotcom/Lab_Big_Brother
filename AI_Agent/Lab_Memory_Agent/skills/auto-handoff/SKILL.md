@@ -18,7 +18,13 @@ Keep one concise current snapshot and one append-only work log so a new AI can r
    - `state`, `completed`, `decisions`, `blockers`, `next_actions`, `files_to_read`, `changed_files`, `notes`: arrays of concise strings.
 4. Run `scripts/update_handoff.py --input <json-file>`. The script finds the shared root from its installed location; use `--root <path>` only when testing or using a copied script.
 5. Let the updater call `scripts/sync_github.py` after writing. Use `--no-github-sync` only for an explicit local-only operation.
-6. Verify `PROJECT_HANDOFF.md`, the newest work-log section, and the Git push result before claiming the handoff is current.
+6. Refresh 大师兄 self-knowledge after the handoff and GitHub sync, so it sees the final current snapshot:
+
+```bash
+python /Volumes/ZZLab_AI/AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/update_self_knowledge.py
+```
+
+7. Verify `PROJECT_HANDOFF.md`, the newest work-log section, the self-knowledge page, and the Git push result before claiming the handoff is current.
 
 ## Content Rules
 

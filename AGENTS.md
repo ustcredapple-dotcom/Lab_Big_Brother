@@ -14,6 +14,7 @@ Before the final response after significant work, load `AI_Agent/Lab_Memory_Agen
 
 - Rewrite `PROJECT_HANDOFF.md` as a concise current snapshot.
 - Append one idempotent session entry to `Document/AI_Agent_Migration_2026-06-11/conversation_records/WORK_LOG.md`.
+- Refresh 大师兄 self-knowledge with `AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/update_self_knowledge.py` so the agent understands its own current architecture and work after each significant update.
 - Do not log casual conversation or answers that leave project state unchanged.
 - Do not paste full conversations or hidden reasoning. Record outcomes, evidence, decisions, blockers, changed paths, and executable next actions.
 - Never record passwords, tokens, cookies, private keys, or unnecessary personal information.

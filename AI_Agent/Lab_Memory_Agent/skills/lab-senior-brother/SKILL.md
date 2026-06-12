@@ -29,7 +29,9 @@ python /Volumes/ZZLab_AI/AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scr
 
 ## Web Interface
 
-To launch the local browser UI:
+The web interface is currently retired as a routine entrypoint. The user asked to stop the web version because Telegram/Codex are the useful interfaces. Keep the script available for local debugging only; do not start or expose it unless the user explicitly asks.
+
+For one-off local debugging:
 
 ```bash
 python /Volumes/ZZLab_AI/AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/serve_lab_senior_brother.py
@@ -39,9 +41,9 @@ Then open `http://127.0.0.1:8765/`.
 
 The browser never receives the Qwen API key. The local Python server reads the key, queries the notebook index, calls Qwen when enabled, and returns the answer plus source HTML links.
 
-The UI has a `中文 / English` response-language toggle. Use it to force the final DeepSeek answer language regardless of whether the retrieved notebook evidence is Chinese or English.
+The UI has a `中文 / English` response-language toggle. Use it to force the final Qwen answer language regardless of whether the retrieved notebook evidence is Chinese or English.
 
-For public access, run the local server with Basic Auth and expose port `8765` through ngrok:
+The LaunchAgent `com.zzlab.lab-senior-brother` should stay unloaded/disabled by default. Public ngrok access is also stopped by default. If the user explicitly asks to re-enable the web UI, run the local server with Basic Auth and expose port `8765` through ngrok:
 
 ```bash
 LAB_SENIOR_BROTHER_USER="..." \
@@ -82,6 +84,11 @@ When new notebook HTML exports are added:
 2. Refresh `DEEPSEEK_DISTILLATION.html/json` using `distill_html_with_deepseek.py` if external API use is approved. The file name is kept for compatibility; current default provider is Qwen.
 3. Re-run this skill's query script on representative questions to verify retrieval quality.
 4. Update `PROJECT_HANDOFF.md` and `WORK_LOG.md` after significant changes.
+5. Refresh 大师兄 self-knowledge so the agent can answer questions about its own current architecture and maintenance state:
+
+```bash
+python /Volumes/ZZLab_AI/AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/update_self_knowledge.py
+```
 
 For routine maintenance, prefer the daily incremental updater:
 

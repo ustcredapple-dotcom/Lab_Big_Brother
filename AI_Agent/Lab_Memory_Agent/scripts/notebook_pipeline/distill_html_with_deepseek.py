@@ -12,6 +12,8 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
 
+import llm_provider
+
 
 class TextParser(html.parser.HTMLParser):
     BLOCK_TAGS = {"p", "div", "br", "tr", "table", "li", "h1", "h2", "h3"}
@@ -58,14 +60,7 @@ def sha256(path: Path) -> str:
 
 
 def read_deepseek_key(path: Path) -> str:
-    raw = path.read_text(encoding="utf-8").strip()
-    parts = raw.replace("：", ":").replace("=", " ").replace(":", " ").split()
-    for part in parts:
-        if part.startswith("sk-"):
-            return part
-    if raw.startswith("sk-"):
-        return raw
-    raise SystemExit(f"No DeepSeek sk-token found in {path}")
+    return llm_provider.read_api_key(path)
 
 
 def extract_html(path: Path) -> tuple[str, list[str]]:
@@ -81,45 +76,14 @@ def extract_html(path: Path) -> tuple[str, list[str]]:
 
 
 def call_deepseek(key: str, model: str, messages: list[dict], timeout: int, retries: int) -> tuple[dict, dict, str]:
-    payload = {
-        "model": model,
-        "messages": messages,
-        "response_format": {"type": "json_object"},
-        "temperature": 0.1,
-        "stream": False,
-    }
-    last_error = None
-    for attempt in range(1, retries + 1):
-        result = subprocess.run(
-            [
-                "curl",
-                "-sS",
-                "https://api.deepseek.com/chat/completions",
-                "-H",
-                f"Authorization: Bearer {key}",
-                "-H",
-                "Content-Type: application/json",
-                "-d",
-                json.dumps(payload, ensure_ascii=False),
-            ],
-            check=False,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=timeout,
-        )
-        if result.returncode:
-            last_error = result.stderr.strip() or f"curl exited {result.returncode}"
-        else:
-            data = json.loads(result.stdout)
-            if data.get("error"):
-                last_error = json.dumps(data["error"], ensure_ascii=False)
-            else:
-                content = data["choices"][0]["message"]["content"]
-                return json.loads(content), data.get("usage", {}), data.get("model", model)
-        if attempt < retries:
-            time.sleep(2 * attempt)
-    raise RuntimeError(last_error or "DeepSeek request failed")
+    return llm_provider.call_json(
+        key=key,
+        model=model,
+        messages=messages,
+        timeout=timeout,
+        retries=retries,
+        provider=llm_provider.infer_provider(model),
+    )
 
 
 def truncate(text: str, limit: int) -> str:
@@ -263,7 +227,7 @@ def render_html(data: dict) -> str:
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>ZZLab Notebook DeepSeek Distillation</title>
+  <title>ZZLab Notebook LLM Distillation</title>
   <style>
     body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; margin: 32px; line-height: 1.5; }}
     table {{ border-collapse: collapse; width: 100%; }}
@@ -273,7 +237,7 @@ def render_html(data: dict) -> str:
   </style>
 </head>
 <body>
-  <h1>ZZLab Notebook DeepSeek Distillation</h1>
+  <h1>ZZLab Notebook LLM Distillation</h1>
   <p>Generated at {html.escape(data['generated_at'])}. Source format remains HTML; this file is a navigational derivative.</p>
   <h2>Notebook Summary</h2>
   <p>{html.escape(notebook.get('notebook_summary', ''))}</p>
@@ -286,12 +250,12 @@ def render_html(data: dict) -> str:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Distill HTML lab notebook pages with DeepSeek.")
+    parser = argparse.ArgumentParser(description="Distill HTML lab notebook pages with the configured LLM provider.")
     parser.add_argument("--html-root", type=Path, required=True)
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
-    parser.add_argument("--key-file", type=Path, default=Path("/Volumes/ZZLab_AI/Key/Deepseek Key.txt"))
-    parser.add_argument("--model", default="deepseek-chat")
+    parser.add_argument("--key-file", type=Path, default=Path("/Volumes/ZZLab_AI/Key/Qwen Key.txt"))
+    parser.add_argument("--model", default=llm_provider.QWEN_MODEL)
     parser.add_argument("--timeout", type=int, default=180)
     args = parser.parse_args()
 
@@ -328,7 +292,7 @@ def main() -> None:
     usage_records.append({"kind": "notebook", "usage": usage, "model": actual_model})
     output = {
         "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-        "method": "deepseek_html_distillation",
+        "method": "qwen_html_distillation",
         "requested_model": args.model,
         "source_manifest": str(args.manifest),
         "html_root": str(args.html_root),

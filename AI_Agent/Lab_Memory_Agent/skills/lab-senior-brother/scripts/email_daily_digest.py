@@ -13,7 +13,7 @@ PROCESSING = ZZLAB_ROOT / "Document/Lab_Notebook_Processing"
 DISTILLATION = PROCESSING / "html_deepseek_distilled/DEEPSEEK_DISTILLATION.json"
 DISTILLATION_HTML = PROCESSING / "html_deepseek_distilled/DEEPSEEK_DISTILLATION.html"
 DEFAULT_FOLDER_NAME = "email文件和邮件记录"
-DEEPSEEK_KEY = ZZLAB_ROOT / "Key/Deepseek Key.txt"
+DEEPSEEK_KEY = ZZLAB_ROOT / "Key/Qwen Key.txt"
 SCRIPT_DIR = Path(__file__).resolve().parents[3] / "scripts/notebook_pipeline"
 CHANNEL_SECTION = "Email Records"
 
@@ -241,7 +241,7 @@ Text extracts from email bodies and readable attachments:
 """
         distilled, _usage, _model = deepseek.call_deepseek(
             key,
-            "deepseek-chat",
+            "qwen3.7-plus",
             [
                 {"role": "system", "content": "You are a careful laboratory archivist. Always return JSON only."},
                 {"role": "user", "content": prompt},
@@ -252,7 +252,7 @@ Text extracts from email bodies and readable attachments:
         return distilled
     except Exception as exc:
         fallback = local_distill(day, records)
-        fallback.setdefault("confidence_notes", []).append(f"DeepSeek digest failed; local fallback used: {type(exc).__name__}: {exc}")
+        fallback.setdefault("confidence_notes", []).append(f"Qwen digest failed; local fallback used: {type(exc).__name__}: {exc}")
         return fallback
 
 

@@ -2,8 +2,8 @@
 
 Use these files as the current notebook knowledge base:
 
-- DeepSeek distilled index: `/Volumes/ZZLab_AI/Document/Lab_Notebook_Processing/html_deepseek_distilled/DEEPSEEK_DISTILLATION.json`
-- DeepSeek human overview: `/Volumes/ZZLab_AI/Document/Lab_Notebook_Processing/html_deepseek_distilled/DEEPSEEK_DISTILLATION.html`
+- Qwen distilled index: `/Volumes/ZZLab_AI/Document/Lab_Notebook_Processing/html_deepseek_distilled/DEEPSEEK_DISTILLATION.json`
+- Qwen human overview: `/Volumes/ZZLab_AI/Document/Lab_Notebook_Processing/html_deepseek_distilled/DEEPSEEK_DISTILLATION.html`
 - HTML manifest: `/Volumes/ZZLab_AI/Document/Lab_Notebook_Processing/html/active/HTML_MANIFEST.json`
 - HTML index: `/Volumes/ZZLab_AI/Document/Lab_Notebook_Processing/html/active/HTML_INDEX.html`
 - Source HTML root: `/Volumes/ZZLab_AI/Document/Lab_Notebook_Processing/html/active/Lab_Notebook_Original_2026-06-11/`
@@ -32,4 +32,4 @@ Public tunnel notes:
 - The web server supports Basic Auth through `--access-user` / `--access-password` or `LAB_SENIOR_BROTHER_USER` / `LAB_SENIOR_BROTHER_PASSWORD`.
 - ngrok is used only as a transport from the public URL to local port `8765`.
 - Runtime credentials and ngrok authtokens live in private local files, not in the public repository.
-- A public tunnel gives remote users access to the query UI and can consume DeepSeek API quota, so share the URL and login only with trusted users.
+- A public tunnel gives remote users access to the query UI and can consume Qwen API quota, so share the URL and login only with trusted users.

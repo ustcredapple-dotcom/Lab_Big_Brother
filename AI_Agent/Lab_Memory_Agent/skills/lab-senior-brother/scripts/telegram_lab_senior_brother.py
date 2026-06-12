@@ -6,6 +6,7 @@ import json
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from datetime import datetime
@@ -22,7 +23,13 @@ DEFAULT_INBOX = ZZLAB_ROOT / "AI_Agent/Lab_Memory_Agent/inbox/telegram"
 DEFAULT_DAILY_ROOT = ZZLAB_ROOT
 DEFAULT_DISTILLATION = ZZLAB_ROOT / "Document/Lab_Notebook_Processing/html_deepseek_distilled/DEEPSEEK_DISTILLATION.json"
 DEFAULT_HTML_ROOT = ZZLAB_ROOT / "Document/Lab_Notebook_Processing/html/active/Lab_Notebook_Original_2026-06-11"
-DEFAULT_DEEPSEEK_KEY = ZZLAB_ROOT / "Key/Deepseek Key.txt"
+DEFAULT_LLM_KEY = ZZLAB_ROOT / "Key/Qwen Key.txt"
+DEFAULT_LLM_MODEL = "qwen3.7-plus"
+PIPELINE_DIR = ZZLAB_ROOT / "AI_Agent/Lab_Memory_Agent/scripts/notebook_pipeline"
+if str(PIPELINE_DIR) not in sys.path:
+    sys.path.insert(0, str(PIPELINE_DIR))
+
+import llm_provider  # noqa: E402
 
 
 HELP_TEXT = """实验室大师兄 Telegram 入口
@@ -84,6 +91,7 @@ def default_config() -> dict[str, Any]:
         "allow_registration_mode": True,
         "send_html_details": True,
         "persistent_record_kinds": ["note", "file", "mode", "admin"],
+        "llm_model": DEFAULT_LLM_MODEL,
     }
 
 
@@ -127,51 +135,20 @@ def telegram_request(token: str, method: str, payload: dict[str, Any] | None = N
     return result
 
 
-def read_deepseek_key(path: Path = DEFAULT_DEEPSEEK_KEY) -> str:
-    raw = path.read_text(encoding="utf-8").strip()
-    parts = raw.replace("：", ":").replace("=", " ").replace(":", " ").split()
-    for part in parts:
-        if part.startswith("sk-"):
-            return part
-    if raw.startswith("sk-"):
-        return raw
-    raise RuntimeError(f"No DeepSeek sk-token found in {path}")
+def read_llm_key(path: Path = DEFAULT_LLM_KEY) -> str:
+    return llm_provider.read_api_key(path)
 
 
-def deepseek_json(messages: list[dict[str, str]], model: str = "deepseek-chat", timeout: int = 120) -> tuple[dict[str, Any], dict[str, Any]]:
-    payload = {
-        "model": model,
-        "messages": messages,
-        "response_format": {"type": "json_object"},
-        "temperature": 0.1,
-        "stream": False,
-    }
-    completed = subprocess.run(
-        [
-            "curl",
-            "-sS",
-            "https://api.deepseek.com/chat/completions",
-            "-H",
-            f"Authorization: Bearer {read_deepseek_key()}",
-            "-H",
-            "Content-Type: application/json",
-            "-d",
-            json.dumps(payload, ensure_ascii=False),
-        ],
-        check=False,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+def llm_json(messages: list[dict[str, Any]], model: str = DEFAULT_LLM_MODEL, timeout: int = 120) -> tuple[dict[str, Any], dict[str, Any]]:
+    data, usage, _actual_model = llm_provider.call_json(
+        key=read_llm_key(),
+        model=model,
+        messages=messages,
         timeout=timeout,
+        retries=2,
+        provider=llm_provider.infer_provider(model, DEFAULT_LLM_KEY),
     )
-    if completed.returncode:
-        detail = completed.stderr.strip() or completed.stdout.strip() or f"curl exited {completed.returncode}"
-        raise RuntimeError(f"DeepSeek request failed: {detail}")
-    data = json.loads(completed.stdout)
-    if data.get("error"):
-        raise RuntimeError(json.dumps(data["error"], ensure_ascii=False))
-    content = data["choices"][0]["message"]["content"]
-    return json.loads(content), data.get("usage", {})
+    return data, usage
 
 
 def send_message(token: str, chat_id: int, text: str) -> None:
@@ -421,7 +398,7 @@ def deepseek_select_evidence(question: str, pages: list[dict[str, Any]], config:
             ),
         },
     ]
-    return deepseek_json(messages, timeout=int(config.get("query_timeout_seconds", 60)) + 60)
+    return llm_json(messages, model=str(config.get("llm_model") or DEFAULT_LLM_MODEL), timeout=int(config.get("query_timeout_seconds", 60)) + 60)
 
 
 def deepseek_answer_from_evidence(question: str, evidence: list[dict[str, Any]], config: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -468,7 +445,7 @@ def deepseek_answer_from_evidence(question: str, evidence: list[dict[str, Any]],
             ),
         },
     ]
-    return deepseek_json(messages, timeout=int(config.get("query_timeout_seconds", 60)) + 60)
+    return llm_json(messages, model=str(config.get("llm_model") or DEFAULT_LLM_MODEL), timeout=int(config.get("query_timeout_seconds", 60)) + 60)
 
 
 def query_notebook(question: str, config: dict[str, Any]) -> dict[str, Any]:
@@ -487,14 +464,14 @@ def query_notebook(question: str, config: dict[str, Any]) -> dict[str, Any]:
         if not selection.get("has_answer") or not selected_ids:
             return {
                 "query": question,
-                "engine": "deepseek_runtime_distilled_directory",
+                "engine": "qwen_runtime_distilled_directory",
                 "likely_done_before": "unknown",
                 "confidence": "low",
                 "top_score": 0,
                 "evidence_count": 0,
                 "evidence": [],
                 "answer": "师兄我也不知道，notebook 里没找到明确记录。",
-                "deepseek_selection": selection,
+                "llm_selection": selection,
                 "usage": {"selection": select_usage},
             }
         evidence = [evidence_from_page(pages[page_id - 1], page_id) for page_id in selected_ids]
@@ -506,18 +483,18 @@ def query_notebook(question: str, config: dict[str, Any]) -> dict[str, Any]:
             evidence = []
         return {
             "query": question,
-            "engine": "deepseek_runtime_distilled_directory",
+            "engine": "qwen_runtime_distilled_directory",
             "likely_done_before": "yes" if has_answer else "unknown",
-            "confidence": "deepseek",
+            "confidence": "llm",
             "top_score": 100 if has_answer else 0,
             "evidence_count": len(evidence),
             "evidence": evidence,
             "answer": reply,
-            "deepseek_selection": selection,
+            "llm_selection": selection,
             "usage": {"selection": select_usage, "answer": answer_usage},
         }
     except Exception as exc:
-        return {"error": f"DeepSeek 查询失败：{type(exc).__name__}: {exc}"}
+        return {"error": f"Qwen 查询失败：{type(exc).__name__}: {exc}"}
 
 
 def render_query_html(question: str, result: dict[str, Any], output: Path) -> None:
@@ -790,6 +767,10 @@ def pdf_like(path: Path, mime_type: str = "") -> bool:
     return path.suffix.casefold() == ".pdf" or mime_type == "application/pdf"
 
 
+def image_like(path: Path, mime_type: str = "") -> bool:
+    return mime_type.startswith("image/") or path.suffix.casefold() in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
+
+
 def ignored_binary_like(path: Path, mime_type: str = "") -> bool:
     suffix = path.suffix.casefold()
     return suffix in {".step", ".stp", ".exe", ".dll", ".dylib", ".app", ".zip", ".7z", ".rar", ".tar", ".gz", ".dmg"}
@@ -832,6 +813,30 @@ def write_text_preview_html(source: Path, text: str, output: Path, title: str) -
     )
 
 
+def describe_image_with_qwen(path: Path, context: str = "") -> str:
+    prompt = f"""
+请用中文分析这张实验室归档图片，输出 JSON。
+
+要求：
+- summary: 一句话说明图片内容
+- visible_text: 图片中可读文字，读不到就空数组
+- equipment_or_objects: 可能出现的实验设备、元件、文件、标签
+- lab_relevance: high / medium / low
+- notes: 对后续归档有帮助的细节
+
+图片上下文或 caption:
+{context[:2000]}
+"""
+    result, _usage, _model = llm_provider.describe_image_json(
+        key=read_llm_key(),
+        image_path=path,
+        prompt=prompt,
+        model=DEFAULT_LLM_MODEL,
+        timeout=180,
+    )
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
+
 def save_message_files(token: str, message: dict[str, Any], chat_id: int, user: dict[str, Any], config: dict[str, Any]) -> list[dict[str, Any]]:
     folder = daily_person_dir(chat_id, user, config) / "files"
     saved: list[dict[str, Any]] = []
@@ -871,6 +876,21 @@ def save_message_files(token: str, message: dict[str, Any], chat_id: int, user: 
                 record["html_preview"] = str(html_path)
                 record["text_preview"] = " ".join(text.split())[:1000]
             except Exception as exc:
+                record["text_extract_error"] = f"{type(exc).__name__}: {exc}"
+        elif image_like(destination, mime_type):
+            try:
+                context = str(message.get("caption") or message.get("text") or "")
+                text = describe_image_with_qwen(destination, context)
+                text_path = destination.with_suffix(destination.suffix + ".qwen_vision.json")
+                text_path.write_text(text, encoding="utf-8")
+                html_path = preview_dir / f"{destination.name}.html"
+                write_text_preview_html(destination, text, html_path, f"Qwen vision preview - {destination.name}")
+                record["classification"] = "image_qwen_vision"
+                record["text_extract"] = str(text_path)
+                record["html_preview"] = str(html_path)
+                record["text_preview"] = " ".join(text.split())[:1000]
+            except Exception as exc:
+                record["classification"] = "image_metadata_only"
                 record["text_extract_error"] = f"{type(exc).__name__}: {exc}"
         elif ignored_binary_like(destination, mime_type):
             record["classification"] = "binary_metadata_only"
@@ -1079,11 +1099,11 @@ def deepseek_agent_route(text: str, mode: str, config: dict[str, Any]) -> dict[s
         },
     ]
     try:
-        routed, _usage = deepseek_json(messages, timeout=int(config.get("query_timeout_seconds", 60)) + 30)
+        routed, _usage = llm_json(messages, model=str(config.get("llm_model") or DEFAULT_LLM_MODEL), timeout=int(config.get("query_timeout_seconds", 60)) + 30)
     except Exception as exc:
         if looks_like_file_request(text):
-            return {"action": "find_file", "body": text, "reply": "", "target_chat_id": None, "reason": f"fallback after DeepSeek route error: {exc}"}
-        return {"action": "query_notebook", "body": text, "reply": "", "target_chat_id": None, "reason": f"fallback after DeepSeek route error: {exc}"}
+            return {"action": "find_file", "body": text, "reply": "", "target_chat_id": None, "reason": f"fallback after Qwen route error: {exc}"}
+        return {"action": "query_notebook", "body": text, "reply": "", "target_chat_id": None, "reason": f"fallback after Qwen route error: {exc}"}
     allowed_actions = {"query_notebook", "note", "find_file", "allow_chat_id", "help", "status", "chat", "unsupported"}
     action = str(routed.get("action", "")).strip()
     if action not in allowed_actions:
@@ -1201,7 +1221,7 @@ def handle_message(token: str, message: dict[str, Any], config: dict[str, Any], 
         elif action == "help":
             send_message(token, chat_id, HELP_TEXT)
         elif action == "status":
-            send_message(token, chat_id, f"大师兄 Telegram bot 正在运行。\n当前模式：{mode}\n后端：DeepSeek agent router + 本地安全工具。")
+            send_message(token, chat_id, f"大师兄 Telegram bot 正在运行。\n当前模式：{mode}\n后端：Qwen agent router + 本地安全工具。")
         elif action == "note":
             if not route_body:
                 send_message(token, chat_id, "要记什么？你可以说：记 今天调好了 556 laser。")
@@ -1252,7 +1272,7 @@ def handle_message(token: str, message: dict[str, Any], config: dict[str, Any], 
         append_chat_record(chat_id, user, message, config, "chat", display_text, saved_files)
         send_message(token, chat_id, casual_chat_reply(display_text))
     elif command == "status":
-        send_message(token, chat_id, f"大师兄 Telegram bot 正在运行。\n当前模式：{mode}\n默认：查询；开始记后默认写入。")
+        send_message(token, chat_id, f"大师兄 Telegram bot 正在运行。\n当前模式：{mode}\n后端：Qwen + 本地安全工具。\n默认：查询；开始记后默认写入。")
     elif command == "record_on":
         set_chat_mode(state_path, chat_id, "record")
         append_chat_record(chat_id, user, message, config, "mode", "开始记")

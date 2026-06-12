@@ -22,7 +22,7 @@ AI_Agent/Lab_Memory_Agent/
 
 `AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/` is the GPT-facing lab notebook query interface.
 
-Use it when asking whether the lab has done something before and how it was done. The skill queries the DeepSeek-distilled notebook index first, then points back to the source HTML evidence.
+Use it when asking whether the lab has done something before and how it was done. The skill queries the Qwen-distilled notebook index first, then points back to the source HTML evidence.
 
 Example:
 
@@ -38,7 +38,7 @@ Local web UI:
 python3 AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/serve_lab_senior_brother.py
 ```
 
-Then open `http://127.0.0.1:8765/`. The browser talks to a local Python server; the DeepSeek API key is read only by the server and is not embedded in the HTML page.
+Then open `http://127.0.0.1:8765/`. The browser talks to a local Python server; the Qwen API key is read only by the server and is not embedded in the HTML page.
 
 The UI includes a `中文 / English` toggle for the final answer language.
 
@@ -51,7 +51,7 @@ python3 AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/serve_lab_se
 ngrok http 8765
 ```
 
-The public URL may change when ngrok is restarted unless a reserved domain is configured. Anyone with the URL and Basic Auth credentials can query the notebook interface and may consume DeepSeek API quota.
+The public URL may change when ngrok is restarted unless a reserved domain is configured. Anyone with the URL and Basic Auth credentials can query the notebook interface and may consume Qwen API quota.
 
 Nightly notebook maintenance:
 
@@ -59,7 +59,7 @@ Nightly notebook maintenance:
 python3 AI_Agent/Lab_Memory_Agent/scripts/notebook_pipeline/daily_notebook_update.py
 ```
 
-This can first merge a fresh incoming HTML export into the active HTML tree, skipping duplicate pages and copying only added or changed pages plus their referenced attachments. It then builds a fresh HTML manifest, compares it with the previous snapshot, writes timestamped JSON/Markdown change logs, and sends only added or modified pages to DeepSeek before merging those page records back into the distilled index. A macOS LaunchAgent can run the script every day at `00:00`; keep any cloud-sync command in private local configuration, not in Git.
+This can first merge a fresh incoming HTML export into the active HTML tree, skipping duplicate pages and copying only added or changed pages plus their referenced attachments. It then builds a fresh HTML manifest, compares it with the previous snapshot, writes timestamped JSON/Markdown change logs, and sends only added or modified pages to Qwen before merging those page records back into the distilled index. A macOS LaunchAgent can run the script every day at `00:00`; keep any cloud-sync command in private local configuration, not in Git.
 
 Telegram entrypoint:
 
@@ -69,9 +69,9 @@ python3 AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/telegram_lab
 
 Store the BotFather token privately at `/Volumes/ZZLab_AI/Key/telegram_bot_token.txt`. The bot supports `/id`, `/ask`, `/note`, `/allow`, `/status`, and `/help`; lab access is gated by chat ID allow-list in the private Telegram bot config.
 
-Telegram now uses a small local agent backend. Explicit commands still run directly, while other normal messages go through a DeepSeek router that selects only from a safe local tool registry: chat, notebook query, note capture, archived-file lookup, allow-list admin, help, and status. It does not expose arbitrary shell or filesystem access. Greetings and light social messages get a natural “大师兄已就位” style reply; lab questions query the notebook; `记` or `/note` writes a note; `开始记` switches that chat into record mode; and `停止记` switches back to query mode. Only durable records are kept long term by default: notes, uploaded files, mode changes, and admin actions. Ordinary queries, greetings, file requests, and unsupported requests are not persisted into the daily records; query-detail HTML is generated temporarily for sending and then discarded. Query replies use DeepSeek at runtime to inspect the distilled notebook directory, select evidence pages, and write the short answer; if DeepSeek finds no direct evidence, the bot should say it does not know instead of forcing an unrelated result. Any actual uploaded file, including Telegram photos/images, is archived automatically by date and sender, using the caption/current chat as context; text-like files, Markdown, HTML, CSV/JSON, and PDF files get text/HTML previews, while images and binary engineering files such as STEP or EXE are stored as metadata-only attachments.
+Telegram now uses a small local agent backend. Explicit commands still run directly, while other normal messages go through a Qwen router that selects only from a safe local tool registry: chat, notebook query, note capture, archived-file lookup, allow-list admin, help, and status. It does not expose arbitrary shell or filesystem access. Greetings and light social messages get a natural “大师兄已就位” style reply; lab questions query the notebook; `记` or `/note` writes a note; `开始记` switches that chat into record mode; and `停止记` switches back to query mode. Only durable records are kept long term by default: notes, uploaded files, mode changes, and admin actions. Ordinary queries, greetings, file requests, and unsupported requests are not persisted into the daily records; query-detail HTML is generated temporarily for sending and then discarded. Query replies use Qwen at runtime to inspect the distilled notebook directory, select evidence pages, and write the short answer; if Qwen finds no direct evidence, the bot should say it does not know instead of forcing an unrelated result. Any actual uploaded file, including Telegram photos/images, is archived automatically by date and sender, using the caption/current chat as context; text-like files, Markdown, HTML, CSV/JSON, and PDF files get text/HTML previews, while images get Qwen vision previews, and binary engineering files such as STEP or EXE are stored as metadata-only attachments.
 
-Telegram and email daily digests keep their raw archives by source, but DeepSeek memory indexing is topic-first. The nightly digest first filters out obvious verification codes, account-login/security noise, newsletters, advertisements, and promotional messages; when the rule-based filter is unsure, DeepSeek decides conservatively and keeps anything that may be lab-relevant. Kept records are classified against existing notebook sections such as equipment purchasing, ARTIQ, and the Yb experiment, then written as supplemental pages under those topics. Only records that cannot be confidently matched go to `Unsorted Communication Records`; `Telegram Records` and `Email Records` are provenance channels, not long-term topic buckets.
+Telegram and email daily digests keep their raw archives by source, but Qwen memory indexing is topic-first. The nightly digest first filters out obvious verification codes, account-login/security noise, newsletters, advertisements, and promotional messages; when the rule-based filter is unsure, Qwen decides conservatively and keeps anything that may be lab-relevant. Kept records are classified against existing notebook sections such as equipment purchasing, ARTIQ, and the Yb experiment, then written as supplemental pages under those topics. Only records that cannot be confidently matched go to `Unsorted Communication Records`; `Telegram Records` and `Email Records` are provenance channels, not long-term topic buckets.
 
 Gmail forwarding entrypoint:
 
@@ -80,7 +80,7 @@ python3 AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/email_ingest
 python3 AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/email_daily_digest.py
 ```
 
-The Gmail address is `ultracoldhku@gmail.com`. Store a Gmail app password privately at `/Volumes/ZZLab_AI/Key/gmail_app_password.txt`; never store a normal Google password or app password in Git. The ingester reads new unread mail through IMAP, skips known Google account-notification senders by default, archives each message under `/Volumes/ZZLab_AI/YYYY-MM-DD/email文件和邮件记录/<sender>/`, saves raw `.eml`, readable HTML, extracted text, and attachments, then the nightly digest adds that day's email records into the topic-based DeepSeek distillation. Text-like attachments and PDFs get text extracts; binary files are kept as metadata-only attachments.
+The Gmail address is `ultracoldhku@gmail.com`. Store a Gmail app password privately at `/Volumes/ZZLab_AI/Key/gmail_app_password.txt`; never store a normal Google password or app password in Git. The ingester reads new unread mail through IMAP, skips known Google account-notification senders by default, archives each message under `/Volumes/ZZLab_AI/YYYY-MM-DD/email文件和邮件记录/<sender>/`, saves raw `.eml`, readable HTML, extracted text, and attachments, then the nightly digest adds that day's email records into the topic-based Qwen distillation. Text-like attachments and PDFs get text extracts; binary files are kept as metadata-only attachments.
 
 To obtain the Gmail credential, sign in to the Google account, enable 2-Step Verification, then open Google Account Security -> App passwords. Create an app password for Mail, copy the 16-character password, and put that single line in `/Volumes/ZZLab_AI/Key/gmail_app_password.txt`. IMAP must be enabled in Gmail settings. If Google does not show App passwords for this account, use OAuth instead; do not disable account security to make IMAP work.
 

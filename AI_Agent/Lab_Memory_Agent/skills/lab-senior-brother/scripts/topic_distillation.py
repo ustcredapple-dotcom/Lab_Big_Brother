@@ -12,8 +12,14 @@ ZZLAB_ROOT = Path("/Volumes/ZZLab_AI")
 PROCESSING = ZZLAB_ROOT / "Document/Lab_Notebook_Processing"
 DISTILLATION = PROCESSING / "html_deepseek_distilled/DEEPSEEK_DISTILLATION.json"
 DISTILLATION_HTML = PROCESSING / "html_deepseek_distilled/DEEPSEEK_DISTILLATION.html"
-DEEPSEEK_KEY = ZZLAB_ROOT / "Key/Deepseek Key.txt"
+LLM_KEY = ZZLAB_ROOT / "Key/Qwen Key.txt"
+LLM_MODEL = "qwen3.7-plus"
 SCRIPT_DIR = Path(__file__).resolve().parents[3] / "scripts/notebook_pipeline"
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+import llm_provider  # noqa: E402
+
 CHANNEL_SECTIONS = {"Telegram Records", "Email Records"}
 UNSORTED_SECTION = "Unsorted Communication Records"
 NOISE_TAG = "filtered-noise"
@@ -142,10 +148,7 @@ def filter_noise_with_deepseek(source: str, day: date, candidates: list[dict[str
     if not candidates:
         return {}
     try:
-        sys.path.insert(0, str(SCRIPT_DIR))
-        import distill_html_with_deepseek as deepseek  # type: ignore
-
-        key = deepseek.read_deepseek_key(DEEPSEEK_KEY)
+        key = llm_provider.read_api_key(LLM_KEY)
         prompt = f"""
 Return valid JSON only. Decide whether these ZZLab {source} records should enter long-term lab memory.
 
@@ -168,15 +171,16 @@ Return schema:
   ]
 }}
 """
-        result, _usage, _model = deepseek.call_deepseek(
-            key,
-            "deepseek-chat",
-            [
+        result, _usage, _model = llm_provider.call_json(
+            key=key,
+            model=LLM_MODEL,
+            messages=[
                 {"role": "system", "content": "You are a conservative laboratory memory gatekeeper. Always return JSON only."},
                 {"role": "user", "content": prompt},
             ],
             timeout=120,
             retries=2,
+            provider="qwen",
         )
         skipped: dict[str, str] = {}
         for item in result.get("decisions", []):
@@ -290,10 +294,7 @@ def classify_with_deepseek(
     attachments: list[str],
 ) -> list[dict[str, Any]]:
     try:
-        sys.path.insert(0, str(SCRIPT_DIR))
-        import distill_html_with_deepseek as deepseek  # type: ignore
-
-        key = deepseek.read_deepseek_key(DEEPSEEK_KEY)
+        key = llm_provider.read_api_key(LLM_KEY)
         directory = section_directory(data)
         prompt = f"""
 Return valid JSON only. You are updating the ZZLab master notebook memory.
@@ -342,15 +343,16 @@ Return JSON with this schema:
   ]
 }}
 """
-        result, _usage, _model = deepseek.call_deepseek(
-            key,
-            "deepseek-chat",
-            [
+        result, _usage, _model = llm_provider.call_json(
+            key=key,
+            model=LLM_MODEL,
+            messages=[
                 {"role": "system", "content": "You are a careful laboratory archivist. Always return JSON only."},
                 {"role": "user", "content": prompt},
             ],
             timeout=180,
             retries=3,
+            provider="qwen",
         )
         groups = result.get("groups", [])
         if not isinstance(groups, list) or not groups:
@@ -359,7 +361,7 @@ Return JSON with this schema:
     except Exception as exc:
         groups = local_group(source, day, compact_records, attachments)
         groups[0]["distilled"].setdefault("confidence_notes", []).append(
-            f"DeepSeek topic classification failed; local fallback used: {type(exc).__name__}: {exc}"
+            f"Qwen topic classification failed; local fallback used: {type(exc).__name__}: {exc}"
         )
         return groups
 

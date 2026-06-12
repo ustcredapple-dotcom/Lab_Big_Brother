@@ -447,7 +447,7 @@ def incremental_deepseek_update(
         distillation_path,
         {
             "generated_at": detected_at,
-            "method": "deepseek_html_distillation_incremental",
+            "method": "qwen_html_distillation_incremental",
             "requested_model": model,
             "source_manifest": str(manifest_path),
             "html_root": str(html_root),
@@ -519,7 +519,7 @@ def incremental_deepseek_update(
 
     prune_and_sort_distillation(distillation, manifest)
     distillation["generated_at"] = detected_at
-    distillation["method"] = "deepseek_html_distillation_incrementally_updated"
+    distillation["method"] = "qwen_html_distillation_incrementally_updated"
     distillation["requested_model"] = model
     distillation["source_manifest"] = str(manifest_path)
     distillation["html_root"] = str(html_root)
@@ -572,7 +572,7 @@ def load_config(path: Path) -> dict[str, Any]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Daily incremental update for the ZZLab HTML notebook and DeepSeek distillation.")
+    parser = argparse.ArgumentParser(description="Daily incremental update for the ZZLab HTML notebook and LLM distillation.")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--html-root", type=Path, default=DEFAULT_HTML_ROOT)
     parser.add_argument("--index", type=Path, default=DEFAULT_INDEX)
@@ -581,8 +581,8 @@ def main() -> None:
     parser.add_argument("--state-dir", type=Path, default=DEFAULT_STATE_DIR)
     parser.add_argument("--incoming-html-root", type=Path)
     parser.add_argument("--cleanup-incoming", action="store_true")
-    parser.add_argument("--key-file", type=Path, default=Path("/Volumes/ZZLab_AI/Key/Deepseek Key.txt"))
-    parser.add_argument("--model", default="deepseek-chat")
+    parser.add_argument("--key-file", type=Path, default=Path("/Volumes/ZZLab_AI/Key/Qwen Key.txt"))
+    parser.add_argument("--model", default="qwen3.7-plus")
     parser.add_argument("--timeout", type=int, default=180)
     parser.add_argument("--max-diff-lines", type=int, default=500)
     parser.add_argument("--no-deepseek", action="store_true")
@@ -663,7 +663,7 @@ def main() -> None:
         "changelog_md": str(changelog_md),
         "pre_sync": pre_sync,
         "html_merge": merge_result,
-        "deepseek": deepseek_result,
+            "llm_distillation": deepseek_result,
     }
     print(json.dumps(result, ensure_ascii=False, indent=2))
 

@@ -12,7 +12,7 @@ The notebook workflow is HTML-first:
 4. Generate `HTML_INDEX.html` and `HTML_MANIFEST.json` with `build_html_notebook_index.py`.
 5. Let humans and AI agents read the HTML directly.
 6. Optionally generate a local distilled overview with `distill_html_locally.py`.
-7. With project-owner approval, generate a DeepSeek distilled overview with `distill_html_with_deepseek.py`.
+7. With project-owner approval, generate a Qwen distilled overview with `distill_html_with_deepseek.py`. The script name is retained for compatibility.
 
 ## Script
 
@@ -34,7 +34,7 @@ python distill_html_locally.py \
   --output-dir /Volumes/ZZLab_AI/Document/Lab_Notebook_Processing/html_distilled
 ```
 
-Generate or refresh the DeepSeek distillation:
+Generate or refresh the Qwen distillation:
 
 ```bash
 python distill_html_with_deepseek.py \
@@ -57,7 +57,7 @@ The daily updater:
 - rebuilds `HTML_INDEX.html` and `HTML_MANIFEST.json`;
 - compares the current manifest and extracted page text against the previous daily snapshot;
 - writes timestamped JSON and Markdown change logs under `Document/Lab_Notebook_Processing/daily_updates/changes/`;
-- sends only added or modified pages to DeepSeek;
+- sends only added or modified pages to Qwen;
 - merges those refreshed page records into `html_deepseek_distilled/DEEPSEEK_DISTILLATION.json/html`.
 
 Private daily config can set:
@@ -84,8 +84,8 @@ python daily_notebook_update.py --no-deepseek
 - `HTML_MANIFEST.json`: machine-readable metadata for sections, pages, timestamps, source IDs, hashes, and text previews.
 - `html_distilled/LOCAL_DISTILLATION.html`: local condensed overview generated without external API calls.
 - `html_distilled/LOCAL_DISTILLATION.json`: machine-readable local distillation.
-- `html_deepseek_distilled/DEEPSEEK_DISTILLATION.html`: DeepSeek-generated notebook digest.
-- `html_deepseek_distilled/DEEPSEEK_DISTILLATION.json`: machine-readable DeepSeek distillation with page, section, and notebook summaries.
+- `html_deepseek_distilled/DEEPSEEK_DISTILLATION.html`: Qwen-generated notebook digest. The path name is kept for compatibility.
+- `html_deepseek_distilled/DEEPSEEK_DISTILLATION.json`: machine-readable Qwen distillation with page, section, and notebook summaries.
 - `daily_updates/`: private daily snapshots, text diffs, logs, and incremental-update state.
 
 ## Safety Rules

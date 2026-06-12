@@ -19,9 +19,14 @@ ZZLAB_ROOT = Path("/Volumes/ZZLab_AI")
 HTML_ROOT = ZZLAB_ROOT / "Document/Lab_Notebook_Processing/html/active/Lab_Notebook_Original_2026-06-11"
 DISTILLATION = ZZLAB_ROOT / "Document/Lab_Notebook_Processing/html_deepseek_distilled/DEEPSEEK_DISTILLATION.json"
 KEY_FILE = ZZLAB_ROOT / "Key/Deepseek Key.txt"
+LLM_KEY_FILE = ZZLAB_ROOT / "Key/Qwen Key.txt"
+LLM_MODEL = "qwen3.7-plus"
+PIPELINE_DIR = ZZLAB_ROOT / "AI_Agent/Lab_Memory_Agent/scripts/notebook_pipeline"
 
 sys.path.insert(0, str(SCRIPT_DIR))
+sys.path.insert(0, str(PIPELINE_DIR))
 from query_lab_notebook import search  # noqa: E402
+import llm_provider  # noqa: E402
 
 
 HTML_PAGE = r"""<!DOCTYPE html>
@@ -65,14 +70,14 @@ HTML_PAGE = r"""<!DOCTYPE html>
 <main>
   <header>
     <h1>实验室大师兄</h1>
-    <p class="subtitle">先查 DeepSeek 蒸馏索引，再回到原始 HTML 证据。问我“之前做过吗？怎么做的？证据在哪？”</p>
+    <p class="subtitle">先查 LLM 蒸馏索引，再回到原始 HTML 证据。问我“之前做过吗？怎么做的？证据在哪？”</p>
   </header>
 
   <section class="panel">
     <textarea id="question" placeholder="例如：我们之前做过 DDS 验收吗？怎么做的？证据在哪里？"></textarea>
     <div class="row">
       <button id="ask">查询</button>
-      <label><input id="useDeepseek" type="checkbox" checked /> 用 DeepSeek 整理答案</label>
+      <label><input id="useDeepseek" type="checkbox" checked /> 用 Qwen 整理答案</label>
       <span class="meta">回复语言</span>
       <span class="segmented" role="group" aria-label="回复语言">
         <label><input type="radio" name="answerLanguage" value="zh" checked /><span>中文</span></label>
@@ -102,7 +107,7 @@ function list(items, max=4) {
 }
 
 function render(data) {
-  const answer = data.answer || "没有生成 DeepSeek 答案；下面是索引检索结果。";
+  const answer = data.answer || "没有生成 Qwen 答案；下面是索引检索结果。";
   const evidence = data.search?.evidence || [];
   result.innerHTML = `
     <div class="panel">
@@ -163,14 +168,7 @@ question.addEventListener("keydown", e => {
 
 
 def read_deepseek_key(path: Path = KEY_FILE) -> str:
-    raw = path.read_text(encoding="utf-8").strip()
-    parts = raw.replace("：", ":").replace("=", " ").replace(":", " ").split()
-    for part in parts:
-        if part.startswith("sk-"):
-            return part
-    if raw.startswith("sk-"):
-        return raw
-    raise RuntimeError(f"No DeepSeek sk-token found in {path}")
+    return llm_provider.read_api_key(LLM_KEY_FILE if path == KEY_FILE else path)
 
 
 def normalize_language(value: str) -> tuple[str, str]:
@@ -180,7 +178,7 @@ def normalize_language(value: str) -> tuple[str, str]:
     return "zh", "Chinese"
 
 
-def call_deepseek(question: str, search_result: dict, model: str = "deepseek-chat", answer_language: str = "zh") -> tuple[str, dict]:
+def call_deepseek(question: str, search_result: dict, model: str = LLM_MODEL, answer_language: str = "zh") -> tuple[str, dict]:
     key = read_deepseek_key()
     language_code, language_name = normalize_language(answer_language)
     compact_evidence = []
@@ -215,39 +213,18 @@ def call_deepseek(question: str, search_result: dict, model: str = "deepseek-cha
 检索结果：
 {json.dumps({'likely_done_before': search_result.get('likely_done_before'), 'confidence': search_result.get('confidence'), 'evidence': compact_evidence}, ensure_ascii=False)}
 """
-    payload = {
-        "model": model,
-        "messages": [
+    answer, usage, _actual_model = llm_provider.call_text(
+        key=key,
+        model=model,
+        messages=[
             {"role": "system", "content": f"You are a careful lab notebook database steward. Answer only in {language_name}. Do not invent facts."},
             {"role": "user", "content": prompt},
         ],
-        "temperature": 0.1,
-        "stream": False,
-    }
-    result = subprocess.run(
-        [
-            "curl",
-            "-sS",
-            "https://api.deepseek.com/chat/completions",
-            "-H",
-            f"Authorization: Bearer {key}",
-            "-H",
-            "Content-Type: application/json",
-            "-d",
-            json.dumps(payload, ensure_ascii=False),
-        ],
-        check=False,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
         timeout=180,
+        retries=2,
+        provider=llm_provider.infer_provider(model, LLM_KEY_FILE),
     )
-    if result.returncode:
-        raise RuntimeError(result.stderr.strip() or f"curl exited {result.returncode}")
-    data = json.loads(result.stdout)
-    if data.get("error"):
-        raise RuntimeError(json.dumps(data["error"], ensure_ascii=False))
-    return data["choices"][0]["message"]["content"], data.get("usage", {})
+    return answer, usage
 
 
 def source_url_for(html_path: str) -> str:
@@ -366,7 +343,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Serve the 实验室大师兄 local web UI.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
-    parser.add_argument("--model", default="deepseek-chat")
+    parser.add_argument("--model", default=LLM_MODEL)
     parser.add_argument("--access-user", default="")
     parser.add_argument("--access-password", default="")
     parser.add_argument("--no-open", action="store_true")

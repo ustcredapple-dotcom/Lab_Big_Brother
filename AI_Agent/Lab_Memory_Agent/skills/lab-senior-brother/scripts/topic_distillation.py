@@ -16,6 +16,47 @@ DEEPSEEK_KEY = ZZLAB_ROOT / "Key/Deepseek Key.txt"
 SCRIPT_DIR = Path(__file__).resolve().parents[3] / "scripts/notebook_pipeline"
 CHANNEL_SECTIONS = {"Telegram Records", "Email Records"}
 UNSORTED_SECTION = "Unsorted Communication Records"
+NOISE_TAG = "filtered-noise"
+
+OTP_PATTERNS = (
+    r"\b(?:verification|security|login|sign[- ]?in|authentication|confirm(?:ation)?)\s+code\b",
+    r"\b(?:one[- ]?time password|otp|2fa|two[- ]?factor)\b",
+    r"(?:验证码|校验码|动态码|一次性密码|登录代码|安全代码)",
+)
+AD_PATTERNS = (
+    r"\b(?:unsubscribe|newsletter|marketing email|special offer|limited time offer|exclusive offer|promotion|promo code)\b",
+    r"(?:退订|取消订阅|广告|促销|推广|优惠券|限时优惠|新品推荐)",
+)
+LAB_RELEVANCE_HINTS = (
+    "quote",
+    "quotation",
+    "invoice",
+    "purchase",
+    "order",
+    "po",
+    "rfq",
+    "shipping",
+    "delivery",
+    "laser",
+    "cavity",
+    "vacuum",
+    "chamber",
+    "pump",
+    "optics",
+    "dds",
+    "ttl",
+    "artiq",
+    "yb",
+    "实验",
+    "采购",
+    "报价",
+    "发票",
+    "订单",
+    "物流",
+    "激光",
+    "真空",
+    "光学",
+)
 
 
 def read_json(path: Path, default: Any) -> Any:
@@ -42,6 +83,136 @@ def slugify(value: str, fallback: str = "general") -> str:
     value = re.sub(r"[^\w\u4e00-\u9fff .,+()-]+", "_", value)
     value = value.strip(" ._-")
     return value[:80] or fallback
+
+
+def record_text(record: dict[str, Any]) -> str:
+    parts = []
+    for key in ("sender", "subject", "text_preview", "text", "kind", "person"):
+        value = record.get(key)
+        if value:
+            parts.append(str(value))
+    for item in as_list(record.get("attachments")) + as_list(record.get("files")):
+        if isinstance(item, dict):
+            for key in ("filename", "name", "mime_type", "text_preview"):
+                value = item.get(key)
+                if value:
+                    parts.append(str(value))
+    return "\n".join(parts)
+
+
+def lab_relevance_hint(text: str) -> bool:
+    lowered = text.casefold()
+    return any(hint in lowered for hint in LAB_RELEVANCE_HINTS)
+
+
+def heuristic_noise_reason(record: dict[str, Any]) -> str:
+    text = record_text(record)
+    lowered = text.casefold()
+    if any(re.search(pattern, lowered, flags=re.IGNORECASE) for pattern in OTP_PATTERNS):
+        return "verification_or_login_code"
+    if any(re.search(pattern, lowered, flags=re.IGNORECASE) for pattern in AD_PATTERNS) and not lab_relevance_hint(text):
+        return "advertising_or_newsletter"
+    return ""
+
+
+def uncertain_noise_candidate(record: dict[str, Any]) -> bool:
+    text = record_text(record)
+    lowered = text.casefold()
+    if lab_relevance_hint(text):
+        return False
+    weak_markers = (
+        "sale",
+        "discount",
+        "deal",
+        "webinar",
+        "subscribe",
+        "account",
+        "password",
+        "login",
+        "verify",
+        "验证码",
+        "登录",
+        "订阅",
+        "促销",
+    )
+    return any(marker in lowered for marker in weak_markers)
+
+
+def filter_noise_with_deepseek(source: str, day: date, candidates: list[dict[str, Any]]) -> dict[str, str]:
+    if not candidates:
+        return {}
+    try:
+        sys.path.insert(0, str(SCRIPT_DIR))
+        import distill_html_with_deepseek as deepseek  # type: ignore
+
+        key = deepseek.read_deepseek_key(DEEPSEEK_KEY)
+        prompt = f"""
+Return valid JSON only. Decide whether these ZZLab {source} records should enter long-term lab memory.
+
+Skip only records that are clearly not useful lab memory, such as:
+- verification codes, login/security alerts, password resets, OTP messages
+- generic marketing, newsletters, advertisements, promotional offers, unsubscribe-only content
+- obvious social/admin noise with no experimental, purchasing, instrument, protocol, vendor, meeting, or project information
+
+Keep records when they may contain lab-relevant vendor, quote, order, shipping, experiment, instrument, protocol, or project context.
+When unsure, keep the record.
+
+Date: {day.isoformat()}
+Records:
+{json.dumps(candidates, ensure_ascii=False)}
+
+Return schema:
+{{
+  "decisions": [
+    {{"id": "record id", "keep": true, "reason": "short reason"}}
+  ]
+}}
+"""
+        result, _usage, _model = deepseek.call_deepseek(
+            key,
+            "deepseek-chat",
+            [
+                {"role": "system", "content": "You are a conservative laboratory memory gatekeeper. Always return JSON only."},
+                {"role": "user", "content": prompt},
+            ],
+            timeout=120,
+            retries=2,
+        )
+        skipped: dict[str, str] = {}
+        for item in result.get("decisions", []):
+            if not isinstance(item, dict):
+                continue
+            record_id = str(item.get("id") or "")
+            if record_id and item.get("keep") is False:
+                skipped[record_id] = str(item.get("reason") or "llm_noise_filter")
+        return skipped
+    except Exception:
+        return {}
+
+
+def filter_memory_records(source: str, day: date, compact_records: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    kept = []
+    filtered = []
+    uncertain = []
+    for record in compact_records:
+        reason = heuristic_noise_reason(record)
+        if reason:
+            filtered.append({"id": record.get("id"), "reason": reason})
+        else:
+            kept.append(record)
+            if uncertain_noise_candidate(record):
+                uncertain.append(record)
+    llm_skips = filter_noise_with_deepseek(source, day, uncertain)
+    if llm_skips:
+        revised_kept = []
+        for record in kept:
+            record_id = str(record.get("id"))
+            if record_id in llm_skips:
+                filtered.append({"id": record_id, "reason": llm_skips[record_id]})
+            else:
+                revised_kept.append(record)
+        kept = revised_kept
+    return kept, filtered
 
 
 def render_distillation_html(data: dict[str, Any]) -> None:
@@ -309,14 +480,31 @@ def upsert_topic_supplements(
     data = read_json(DISTILLATION, {"sections": [], "usage": []})
     removed_channel_page = remove_channel_page(data, channel_section, day)
     pruned_channel_section = prune_empty_channel_sections(data)
+    original_count = len(compact_records)
+    compact_records, filtered_records = filter_memory_records(source, day, compact_records)
     if not compact_records:
         if removed_channel_page or pruned_channel_section:
             data["generated_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
+            data.setdefault("incremental_updates", []).append(
+                {
+                    "detected_at": data["generated_at"],
+                    "source_channel": source,
+                    "records_day": day.isoformat(),
+                    "html": str(html_path),
+                    "records": original_count,
+                    "filtered_records": filtered_records,
+                    "topic_supplement_pages": [],
+                    "removed_channel_page": removed_channel_page,
+                    "pruned_channel_section": pruned_channel_section,
+                }
+            )
             write_json(DISTILLATION, data)
             render_distillation_html(data)
         return {
             "groups": 0,
             "pages": [],
+            "records": original_count,
+            "filtered_records": filtered_records,
             "removed_channel_page": removed_channel_page,
             "pruned_channel_section": pruned_channel_section,
         }
@@ -360,7 +548,8 @@ def upsert_topic_supplements(
             "source_channel": source,
             "records_day": day.isoformat(),
             "html": str(html_path),
-            "records": len(compact_records),
+            "records": original_count,
+            "filtered_records": filtered_records,
             "topic_supplement_pages": pages_written,
             "removed_channel_page": removed_channel_page,
             "pruned_channel_section": pruned_channel_section,
@@ -371,6 +560,8 @@ def upsert_topic_supplements(
     return {
         "groups": len(groups),
         "pages": pages_written,
+        "records": original_count,
+        "filtered_records": filtered_records,
         "removed_channel_page": removed_channel_page,
         "pruned_channel_section": pruned_channel_section,
     }

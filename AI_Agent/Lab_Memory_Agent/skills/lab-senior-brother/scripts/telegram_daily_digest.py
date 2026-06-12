@@ -348,6 +348,7 @@ def main() -> None:
                 "distilled": bool(memory_records),
                 "topic_groups": topic_result.get("groups", 0),
                 "topic_pages": topic_result.get("pages", []),
+                "filtered_records": topic_result.get("filtered_records", []),
                 "removed_channel_page": topic_result.get("removed_channel_page", False),
                 "pruned_channel_section": topic_result.get("pruned_channel_section", False),
             },

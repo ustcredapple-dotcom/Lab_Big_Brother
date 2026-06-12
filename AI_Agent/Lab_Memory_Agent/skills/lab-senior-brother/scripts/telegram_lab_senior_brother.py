@@ -66,6 +66,13 @@ def write_json(path: Path, value: Any) -> None:
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def redact_secrets(text: str) -> str:
+    text = re.sub(r"bot\d+:[A-Za-z0-9_-]+", "bot<redacted>", text)
+    text = re.sub(r"\b\d{6,}:[A-Za-z0-9_-]{20,}\b", "<telegram-token-redacted>", text)
+    text = re.sub(r"sk-[A-Za-z0-9_-]+", "sk-<redacted>", text)
+    return text
+
+
 def default_config() -> dict[str, Any]:
     return {
         "allowed_chat_ids": [],
@@ -85,6 +92,10 @@ def telegram_request(token: str, method: str, payload: dict[str, Any] | None = N
         "curl",
         "-sS",
         "--fail-with-body",
+        "--connect-timeout",
+        "10",
+        "--max-time",
+        str(max(15, timeout)),
         f"https://api.telegram.org/bot{token}/{method}",
     ]
     if payload is not None:
@@ -96,14 +107,17 @@ def telegram_request(token: str, method: str, payload: dict[str, Any] | None = N
                 json.dumps(payload, ensure_ascii=False),
             ]
         )
-    completed = subprocess.run(
-        command,
-        check=False,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        timeout=timeout,
-    )
+    try:
+        completed = subprocess.run(
+            command,
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout + 5,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"Telegram API {method} timed out after {timeout + 5} seconds") from exc
     if completed.returncode:
         detail = completed.stdout.strip() or completed.stderr.strip() or f"curl exited {completed.returncode}"
         raise RuntimeError(f"Telegram API {method} failed: {detail}")
@@ -188,7 +202,10 @@ def send_document(token: str, chat_id: int, path: Path, caption: str = "") -> No
     ]
     if caption:
         command.extend(["-F", f"caption={caption[:900]}"])
-    completed = subprocess.run(command, check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+    try:
+        completed = subprocess.run(command, check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("Telegram sendDocument timed out after 60 seconds") from exc
     if completed.returncode:
         detail = completed.stdout.strip() or completed.stderr.strip() or f"curl exited {completed.returncode}"
         raise RuntimeError(f"Telegram sendDocument failed: {detail}")
@@ -731,21 +748,28 @@ def download_telegram_file(token: str, file_id: str, destination: Path) -> None:
     if not file_path:
         raise RuntimeError("Telegram getFile did not return file_path")
     destination.parent.mkdir(parents=True, exist_ok=True)
-    completed = subprocess.run(
-        [
-            "curl",
-            "-sS",
-            "--fail-with-body",
-            "-o",
-            str(destination),
-            f"https://api.telegram.org/file/bot{token}/{file_path}",
-        ],
-        check=False,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        timeout=180,
-    )
+    try:
+        completed = subprocess.run(
+            [
+                "curl",
+                "-sS",
+                "--fail-with-body",
+                "--connect-timeout",
+                "15",
+                "--max-time",
+                "180",
+                "-o",
+                str(destination),
+                f"https://api.telegram.org/file/bot{token}/{file_path}",
+            ],
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=185,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("Telegram file download timed out after 185 seconds") from exc
     if completed.returncode:
         detail = completed.stdout.strip() or completed.stderr.strip() or f"curl exited {completed.returncode}"
         raise RuntimeError(f"Telegram file download failed: {detail}")
@@ -1279,11 +1303,11 @@ def poll(token: str, config_path: Path, offset_path: Path, state_path: Path, onc
                     except Exception as exc:
                         chat_id = int((update.get("message", {}).get("chat") or {}).get("id", 0))
                         if chat_id:
-                            send_message(token, chat_id, f"处理失败：{type(exc).__name__}: {exc}")
-                        print(f"message handling failed: {type(exc).__name__}: {exc}", flush=True)
+                            send_message(token, chat_id, f"处理失败：{type(exc).__name__}: {redact_secrets(str(exc))}")
+                        print(f"message handling failed: {type(exc).__name__}: {redact_secrets(str(exc))}", flush=True)
                 write_json(offset_path, {"offset": offset})
         except Exception as exc:
-            print(f"poll failed: {type(exc).__name__}: {exc}", flush=True)
+            print(f"poll failed: {type(exc).__name__}: {redact_secrets(str(exc))}", flush=True)
             time.sleep(5)
         if once:
             return

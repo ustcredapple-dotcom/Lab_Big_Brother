@@ -18,6 +18,10 @@ QWEN_BASE_URLS = (
     "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions",
     "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
 )
+QWEN_EMBEDDING_URLS = (
+    "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/embeddings",
+    "https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings",
+)
 DEEPSEEK_URL = "https://api.deepseek.com/chat/completions"
 
 
@@ -46,6 +50,16 @@ def endpoint_candidates(provider: str, base_url: str = "") -> list[str]:
     if provider == "qwen":
         return list(QWEN_BASE_URLS)
     return [DEEPSEEK_URL]
+
+
+def embedding_endpoint_candidates(provider: str, base_url: str = "") -> list[str]:
+    if base_url:
+        if base_url.endswith("/embeddings"):
+            return [base_url]
+        return [base_url.rstrip("/") + "/embeddings"]
+    if provider == "qwen":
+        return list(QWEN_EMBEDDING_URLS)
+    return []
 
 
 def strip_json_fences(value: str) -> str:
@@ -179,6 +193,106 @@ def call_text(
         base_url=base_url,
     )
     return data["choices"][0]["message"]["content"], usage, actual_model
+
+
+def call_embeddings(
+    *,
+    key: str,
+    texts: list[str],
+    model: str = "text-embedding-v4",
+    dimensions: int | None = 512,
+    timeout: int = 120,
+    retries: int = 2,
+    provider: str = "qwen",
+    base_url: str = "",
+) -> tuple[list[list[float]], dict[str, Any], str]:
+    if not texts:
+        return [], {}, model
+    endpoints = embedding_endpoint_candidates(provider, base_url)
+    if not endpoints:
+        raise RuntimeError(f"No embedding endpoint configured for provider: {provider}")
+    payload: dict[str, Any] = {"model": model, "input": texts}
+    if dimensions:
+        payload["dimensions"] = dimensions
+    last_error = ""
+    for attempt in range(1, retries + 1):
+        for endpoint in endpoints:
+            result = subprocess.run(
+                [
+                    "curl",
+                    "-sS",
+                    "--fail-with-body",
+                    "--connect-timeout",
+                    "20",
+                    "--max-time",
+                    str(max(30, timeout)),
+                    endpoint,
+                    "-H",
+                    f"Authorization: Bearer {key}",
+                    "-H",
+                    "Content-Type: application/json",
+                    "-d",
+                    json.dumps(payload, ensure_ascii=False),
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=timeout + 5,
+            )
+            if result.returncode:
+                last_error = result.stdout.strip() or result.stderr.strip() or f"curl exited {result.returncode}"
+                continue
+            try:
+                data = json.loads(result.stdout)
+            except json.JSONDecodeError:
+                last_error = result.stdout[:1000]
+                continue
+            if data.get("error"):
+                last_error = json.dumps(data["error"], ensure_ascii=False)
+                continue
+            vectors_by_index = {
+                int(item.get("index", index)): item["embedding"]
+                for index, item in enumerate(data.get("data", []))
+                if item.get("embedding") is not None
+            }
+            vectors = [vectors_by_index[index] for index in range(len(texts))]
+            return vectors, data.get("usage", {}), data.get("model", model)
+        if attempt < retries:
+            time.sleep(2 * attempt)
+    raise RuntimeError(last_error or f"{provider} embedding request failed")
+
+
+def call_embeddings_batched(
+    *,
+    key: str,
+    texts: list[str],
+    model: str = "text-embedding-v4",
+    dimensions: int | None = 512,
+    batch_size: int = 10,
+    timeout: int = 120,
+    retries: int = 2,
+    provider: str = "qwen",
+    base_url: str = "",
+) -> tuple[list[list[float]], list[dict[str, Any]], str]:
+    vectors: list[list[float]] = []
+    usage_records: list[dict[str, Any]] = []
+    actual_model = model
+    for start in range(0, len(texts), max(1, batch_size)):
+        batch = texts[start : start + max(1, batch_size)]
+        batch_vectors, usage, actual_model = call_embeddings(
+            key=key,
+            texts=batch,
+            model=model,
+            dimensions=dimensions,
+            timeout=timeout,
+            retries=retries,
+            provider=provider,
+            base_url=base_url,
+        )
+        vectors.extend(batch_vectors)
+        usage_records.append({"batch_start": start, "batch_size": len(batch), "usage": usage})
+    return vectors, usage_records, actual_model
 
 
 def image_data_url(path: Path) -> str:

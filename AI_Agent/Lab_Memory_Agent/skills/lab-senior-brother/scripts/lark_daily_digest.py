@@ -107,6 +107,15 @@ def record_attachments(records: list[dict[str, Any]]) -> list[str]:
     return attachments
 
 
+def refresh_rag_index() -> dict[str, Any]:
+    try:
+        import rag_query_engine  # type: ignore
+
+        return rag_query_engine.refresh_index_quietly()
+    except Exception as exc:
+        return {"error": f"{type(exc).__name__}: {exc}"}
+
+
 def render_html(day: date, root: Path, records: list[dict[str, Any]], output: Path) -> None:
     by_person: dict[str, list[dict[str, Any]]] = {}
     for record in records:
@@ -175,6 +184,7 @@ def main() -> None:
         attachments=record_attachments(memory_records),
         channel_section=CHANNEL_SECTION,
     )
+    rag_index = refresh_rag_index()
     print(
         json.dumps(
             {
@@ -187,6 +197,11 @@ def main() -> None:
                 "filtered_records": topic_result.get("filtered_records", []),
                 "removed_channel_page": topic_result.get("removed_channel_page", False),
                 "pruned_channel_section": topic_result.get("pruned_channel_section", False),
+                "rag_index": {
+                    "chunk_count": rag_index.get("chunk_count"),
+                    "chunks_with_vectors": rag_index.get("chunks_with_vectors"),
+                    "error": rag_index.get("error") or rag_index.get("embedding_error", ""),
+                },
             },
             ensure_ascii=False,
         )

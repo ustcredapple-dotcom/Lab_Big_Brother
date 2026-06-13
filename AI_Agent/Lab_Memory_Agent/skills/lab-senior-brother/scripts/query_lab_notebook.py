@@ -250,16 +250,16 @@ def search(query: str, distillation: Path, html_root: Path, top_k: int, include_
 def rag_search(query: str, distillation: Path, html_root: Path, top_k: int, include_source_snippets: bool) -> dict[str, Any]:
     if str(SCRIPT_DIR) not in sys.path:
         sys.path.insert(0, str(SCRIPT_DIR))
-    import telegram_lab_senior_brother as rag_core  # type: ignore
+    import rag_query_engine as rag_core  # type: ignore
 
-    rag_core.DEFAULT_DISTILLATION = distillation
-    rag_core.DEFAULT_HTML_ROOT = html_root
-    config = rag_core.default_config()
-    config["default_top_k"] = top_k
+    config = {
+        "default_top_k": top_k,
+        "rag_index_dir": str(rag_core.DEFAULT_INDEX_DIR),
+    }
     result = rag_core.query_notebook(query, config)
     if result.get("error"):
         return {
-            "engine": "qwen_rag_distilled_directory",
+            "engine": "chunk_hybrid_qwen_rag",
             "query": query,
             "likely_done_before": "unknown",
             "confidence": "low",
@@ -268,7 +268,7 @@ def rag_search(query: str, distillation: Path, html_root: Path, top_k: int, incl
             "evidence": [],
             "answer": result["error"],
         }
-    result["engine"] = "qwen_rag_distilled_directory"
+    result["engine"] = result.get("engine", "chunk_hybrid_qwen_rag")
     if not include_source_snippets:
         for item in result.get("evidence", []):
             item.pop("source_snippet", None)
@@ -314,9 +314,9 @@ def render_text(result: dict[str, Any]) -> str:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Query the ZZLab notebook RAG index and source HTML.")
+    parser = argparse.ArgumentParser(description="Query the ZZLab notebook chunk RAG index and source HTML.")
     parser.add_argument("query", help="Question or keywords to search for.")
-    parser.add_argument("--engine", choices=("rag", "lexical"), default="rag", help="Use Qwen RAG evidence selection by default; lexical keeps the old weighted keyword search.")
+    parser.add_argument("--engine", choices=("rag", "lexical"), default="rag", help="Use shared chunk-level hybrid RAG by default; lexical keeps the old weighted keyword search.")
     parser.add_argument("--distillation", type=Path, default=DEFAULT_DISTILLATION)
     parser.add_argument("--html-root", type=Path, default=DEFAULT_HTML_ROOT)
     parser.add_argument("--top-k", type=int, default=5)

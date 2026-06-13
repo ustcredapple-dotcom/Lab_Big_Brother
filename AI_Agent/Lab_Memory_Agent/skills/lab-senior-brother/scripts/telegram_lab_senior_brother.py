@@ -23,6 +23,7 @@ DEFAULT_INBOX = ZZLAB_ROOT / "AI_Agent/Lab_Memory_Agent/inbox/telegram"
 DEFAULT_DAILY_ROOT = ZZLAB_ROOT
 DEFAULT_DISTILLATION = ZZLAB_ROOT / "Document/Lab_Notebook_Processing/html_deepseek_distilled/DEEPSEEK_DISTILLATION.json"
 DEFAULT_HTML_ROOT = ZZLAB_ROOT / "Document/Lab_Notebook_Processing/html/active/Lab_Notebook_Original_2026-06-11"
+DEFAULT_RAG_INDEX = ZZLAB_ROOT / "Document/Lab_Notebook_Processing/rag_chunk_index"
 DEFAULT_LLM_KEY = ZZLAB_ROOT / "Key/Qwen Key.txt"
 DEFAULT_LLM_MODEL = "qwen3.7-plus"
 PIPELINE_DIR = ZZLAB_ROOT / "AI_Agent/Lab_Memory_Agent/scripts/notebook_pipeline"
@@ -92,6 +93,10 @@ def default_config() -> dict[str, Any]:
         "send_html_details": True,
         "persistent_record_kinds": ["note", "file", "mode", "admin"],
         "llm_model": DEFAULT_LLM_MODEL,
+        "rag_engine": "chunk",
+        "rag_index_dir": str(DEFAULT_RAG_INDEX),
+        "rag_candidate_k": 40,
+        "allow_page_rag_fallback": True,
     }
 
 
@@ -449,6 +454,21 @@ def deepseek_answer_from_evidence(question: str, evidence: list[dict[str, Any]],
 
 
 def query_notebook(question: str, config: dict[str, Any]) -> dict[str, Any]:
+    fallback_error = ""
+    if str(config.get("rag_engine", "chunk")) == "chunk":
+        try:
+            import rag_query_engine  # type: ignore
+
+            result = rag_query_engine.query_notebook(question, config)
+            if not result.get("error"):
+                return result
+            fallback_error = str(result.get("error", ""))
+            if not config.get("allow_page_rag_fallback", True):
+                return result
+        except Exception as exc:
+            fallback_error = f"Chunk RAG unavailable: {type(exc).__name__}: {exc}"
+            if not config.get("allow_page_rag_fallback", True):
+                return {"error": fallback_error}
     try:
         pages = load_distilled_pages()
         selection, select_usage = deepseek_select_evidence(question, pages, config)
@@ -472,6 +492,7 @@ def query_notebook(question: str, config: dict[str, Any]) -> dict[str, Any]:
                 "evidence": [],
                 "answer": "师兄我也不知道，notebook 里没找到明确记录。",
                 "llm_selection": selection,
+                "fallback_error": fallback_error,
                 "usage": {"selection": select_usage},
             }
         evidence = [evidence_from_page(pages[page_id - 1], page_id) for page_id in selected_ids]
@@ -491,6 +512,7 @@ def query_notebook(question: str, config: dict[str, Any]) -> dict[str, Any]:
             "evidence": evidence,
             "answer": reply,
             "llm_selection": selection,
+            "fallback_error": fallback_error,
             "usage": {"selection": select_usage, "answer": answer_usage},
         }
     except Exception as exc:
@@ -1221,7 +1243,7 @@ def handle_message(token: str, message: dict[str, Any], config: dict[str, Any], 
         elif action == "help":
             send_message(token, chat_id, HELP_TEXT)
         elif action == "status":
-            send_message(token, chat_id, f"大师兄 Telegram bot 正在运行。\n当前模式：{mode}\n后端：Qwen agent router + 本地安全工具。")
+            send_message(token, chat_id, f"大师兄 Telegram bot 正在运行。\n当前模式：{mode}\n后端：Qwen router + chunk RAG + 本地安全工具。")
         elif action == "note":
             if not route_body:
                 send_message(token, chat_id, "要记什么？你可以说：记 今天调好了 556 laser。")
@@ -1272,7 +1294,7 @@ def handle_message(token: str, message: dict[str, Any], config: dict[str, Any], 
         append_chat_record(chat_id, user, message, config, "chat", display_text, saved_files)
         send_message(token, chat_id, casual_chat_reply(display_text))
     elif command == "status":
-        send_message(token, chat_id, f"大师兄 Telegram bot 正在运行。\n当前模式：{mode}\n后端：Qwen + 本地安全工具。\n默认：查询；开始记后默认写入。")
+        send_message(token, chat_id, f"大师兄 Telegram bot 正在运行。\n当前模式：{mode}\n后端：Qwen router + chunk RAG + 本地安全工具。\n默认：查询；开始记后默认写入。")
     elif command == "record_on":
         set_chat_mode(state_path, chat_id, "record")
         append_chat_record(chat_id, user, message, config, "mode", "开始记")

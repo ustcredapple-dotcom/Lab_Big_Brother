@@ -12,14 +12,18 @@ For Lab Big Brother, RAG is not a keyword search box. It is an evidence pipeline
 
 ## Current State
 
-The system already has a partial RAG loop:
+The system now has a shared chunk-level local RAG loop:
 
 - Source material is preserved as HTML notebook pages and daily Telegram/Lark/email archives.
 - Qwen distills pages into a compact JSON/HTML directory.
-- Telegram and Lark use Qwen to select evidence pages from the distilled directory, then Qwen writes a short answer from selected evidence.
-- The CLI `query_lab_notebook.py` now defaults to the same Qwen RAG evidence-selection path; the old weighted keyword search is still available with `--engine lexical`.
+- `rag_query_engine.py` builds a private local chunk index under `/Volumes/ZZLab_AI/Document/Lab_Notebook_Processing/rag_chunk_index/`.
+- Notebook pages, source HTML, Telegram/Lark records, Gmail records, PDFs, text files, Markdown/HTML/CSV/JSON, and Qwen vision image previews are split into small evidence chunks.
+- Qwen `text-embedding-v4` embeddings plus weighted lexical recall provide hybrid retrieval; Qwen then reranks candidate chunks for direct answerability and writes the short answer.
+- Telegram, Lark, and the CLI use the same shared chunk RAG engine. The older page-level Qwen evidence selector remains only as a fallback if chunk RAG fails.
+- Daily notebook, Telegram, Lark, and email digest scripts refresh the chunk index after new memory is distilled.
+- Evidence is redacted before indexing and before query-detail rendering to avoid exposing passwords, tokens, API keys, and verification codes.
 
-This is better than plain text lookup, but it is still page-level RAG. The main missing layer is chunk-level semantic retrieval.
+The old weighted keyword search is still available only for debugging with `query_lab_notebook.py --engine lexical`.
 
 ## Target Architecture
 
@@ -71,15 +75,23 @@ All user-facing interfaces should call the same RAG engine:
 
 Do not let one interface use a purely mechanical keyword search while another uses Qwen-based evidence selection.
 
-## Near-Term Implementation Plan
+## RAGFlow Option
 
-1. Consolidate the current duplicated Qwen retrieval code into one shared `rag_query_engine.py`.
-2. Build a private chunk index from the distilled notebook plus source HTML.
-3. Add chunk-level retrieval and Qwen reranking.
-4. Migrate Telegram/Lark/CLI to the shared engine.
-5. Add regression questions such as:
-   - `cavity 的 finesse 是多少`
-   - `我们烤过真空吗`
-   - `DDS 怎么验收`
-   - `实验室有几台电脑`
-6. Add a query-failure log for "should know but did not know" cases.
+RAGFlow is a good candidate for a future heavy backend because it provides a UI, document parsing, template chunking, multiple recall, reranking, grounded citations, and APIs. It should be treated as an optional backend rather than an immediate replacement for the lightweight local RAG, because the current Mac has no Docker runtime installed and is ARM64 while RAGFlow's public prebuilt Docker images are x86-focused. Official self-hosting prerequisites include Docker/Compose, at least 16 GB RAM, and at least 50 GB disk.
+
+Recommended integration path:
+
+1. Keep the local chunk RAG as the default production path for Telegram/Lark/email.
+2. Deploy RAGFlow only after Docker Desktop, OrbStack, or Colima is installed and verified.
+3. Use RAGFlow as an experimental backend fed by the same normalized HTML/text exports.
+4. Add a backend switch in `query_notebook`: `local_chunk` by default, `ragflow` when the RAGFlow API is configured and healthy.
+5. Compare answers on regression questions before switching any live interface.
+
+## Regression Questions
+
+Use these after retrieval changes:
+
+- `cavity 的 finesse 是多少`
+- `我们烤过真空吗`
+- `DDS 怎么验收`
+- `实验室有几台电脑`

@@ -618,7 +618,7 @@ def handle_authorized_message(client: Any, message: Any, chat_id: str, sender: d
     if command == "help":
         send_text(client, message_id, HELP_TEXT)
     elif command == "status":
-        send_text(client, message_id, "大师兄 Lark bot 正在运行。\n群里默认记录；被 @ 或命令触发时才回复。\n后端：Qwen agent router + 本地安全工具。")
+        send_text(client, message_id, "大师兄 Lark bot 正在运行。\n群里默认记录；被 @ 或命令触发时才回复。\n后端：Qwen router + chunk RAG + 本地安全工具。")
     elif command == "chat":
         send_text(client, message_id, core.casual_chat_reply(text))
     elif command == "note":
@@ -651,7 +651,7 @@ def handle_authorized_message(client: Any, message: Any, chat_id: str, sender: d
         elif action == "help":
             send_text(client, message_id, HELP_TEXT)
         elif action == "status":
-            send_text(client, message_id, "大师兄 Lark bot 正在运行。\n群里默认记录；被 @ 或命令触发时才回复。")
+            send_text(client, message_id, "大师兄 Lark bot 正在运行。\n群里默认记录；被 @ 或命令触发时才回复。\n后端：Qwen router + chunk RAG + 本地安全工具。")
         elif action == "note":
             path = save_note(route_body, chat_id, sender, message, config)
             append_chat_record(chat_id, sender, message, config, "note", route_body, responded=True)

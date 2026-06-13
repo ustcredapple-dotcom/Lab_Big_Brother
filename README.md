@@ -22,7 +22,7 @@ AI_Agent/Lab_Memory_Agent/
 
 `AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/` is the GPT-facing lab notebook RAG interface.
 
-Use it when asking whether the lab has done something before and how it was done. The skill retrieves relevant evidence, uses Qwen to reason over that evidence, then points back to the source HTML evidence. The old weighted keyword search is retained only as `--engine lexical`; normal CLI usage defaults to `--engine rag`.
+Use it when asking whether the lab has done something before and how it was done. The skill retrieves small evidence chunks from notebook HTML, Telegram/Lark/email records, PDFs, and text-like attachments; combines Qwen embeddings with lexical recall; asks Qwen to rerank for direct answerability; then writes a grounded short answer. The old weighted keyword search is retained only as `--engine lexical`; normal CLI usage defaults to `--engine rag`.
 
 Example:
 
@@ -71,6 +71,18 @@ python3 AI_Agent/Lab_Memory_Agent/scripts/notebook_pipeline/daily_notebook_updat
 
 This can first merge a fresh incoming HTML export into the active HTML tree, skipping duplicate pages and copying only added or changed pages plus their referenced attachments. It then builds a fresh HTML manifest, compares it with the previous snapshot, writes timestamped JSON/Markdown change logs, and sends only added or modified pages to Qwen before merging those page records back into the distilled index. A macOS LaunchAgent can run the script every day at `00:00`; keep any cloud-sync command in private local configuration, not in Git.
 
+Chunk RAG index:
+
+```bash
+python3 AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/rag_query_engine.py --build-index
+```
+
+The private chunk index lives at `/Volumes/ZZLab_AI/Document/Lab_Notebook_Processing/rag_chunk_index/`. Daily notebook, Telegram, Lark, and email digest scripts refresh this index after distillation. Evidence is redacted before indexing/query-detail rendering to avoid exposing passwords, tokens, API keys, and verification codes.
+
+RAGFlow note:
+
+RAGFlow is a plausible future heavy backend if the lab wants a full RAG UI and document-processing platform. It is not the current default because this Mac currently has no Docker runtime installed, and the machine is ARM64 while RAGFlow's public prebuilt Docker images are x86-focused. Keep the local chunk RAG as the production path unless Docker/ARM64 RAGFlow deployment has been installed, tested, and wired through a backend switch.
+
 Telegram entrypoint:
 
 ```bash
@@ -79,7 +91,7 @@ python3 AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/telegram_lab
 
 Store the BotFather token privately at `/Volumes/ZZLab_AI/Key/telegram_bot_token.txt`. The bot supports `/id`, `/ask`, `/note`, `/allow`, `/status`, and `/help`; lab access is gated by chat ID allow-list in the private Telegram bot config.
 
-Telegram now uses a small local agent backend. Explicit commands still run directly, while other normal messages go through a Qwen router that selects only from a safe local tool registry: chat, notebook query, note capture, archived-file lookup, allow-list admin, help, and status. It does not expose arbitrary shell or filesystem access. Greetings and light social messages get a natural “大师兄已就位” style reply; lab questions query the notebook; `记` or `/note` writes a note; `开始记` switches that chat into record mode; and `停止记` switches back to query mode. Only durable records are kept long term by default: notes, uploaded files, mode changes, and admin actions. Ordinary queries, greetings, file requests, and unsupported requests are not persisted into the daily records; query-detail HTML is generated temporarily for sending and then discarded. Query replies use Qwen at runtime to inspect the distilled notebook directory, select evidence pages, and write the short answer; if Qwen finds no direct evidence, the bot should say it does not know instead of forcing an unrelated result. Any actual uploaded file, including Telegram photos/images, is archived automatically by date and sender, using the caption/current chat as context; text-like files, Markdown, HTML, CSV/JSON, and PDF files get text/HTML previews, while images get Qwen vision previews, and binary engineering files such as STEP or EXE are stored as metadata-only attachments.
+Telegram now uses a small local agent backend. Explicit commands still run directly, while other normal messages go through a Qwen router that selects only from a safe local tool registry: chat, notebook query, note capture, archived-file lookup, allow-list admin, help, and status. It does not expose arbitrary shell or filesystem access. Greetings and light social messages get a natural “大师兄已就位” style reply; lab questions query the notebook; `记` or `/note` writes a note; `开始记` switches that chat into record mode; and `停止记` switches back to query mode. Only durable records are kept long term by default: notes, uploaded files, mode changes, and admin actions. Ordinary queries, greetings, file requests, and unsupported requests are not persisted into the daily records; query-detail HTML is generated temporarily for sending and then discarded. Query replies use the shared chunk RAG engine first, with the older page-level Qwen selector kept only as fallback; if Qwen finds no direct evidence, the bot should say it does not know instead of forcing an unrelated result. Any actual uploaded file, including Telegram photos/images, is archived automatically by date and sender, using the caption/current chat as context; text-like files, Markdown, HTML, CSV/JSON, and PDF files get text/HTML previews, while images get Qwen vision previews, and binary engineering files such as STEP or EXE are stored as metadata-only attachments.
 
 Telegram, Lark, and email daily digests keep their raw archives by source, but Qwen memory indexing is topic-first. The nightly digest first filters out obvious verification codes, account-login/security noise, newsletters, advertisements, and promotional messages; when the rule-based filter is unsure, Qwen decides conservatively and keeps anything that may be lab-relevant. Kept records are classified against existing notebook sections such as equipment purchasing, ARTIQ, and the Yb experiment, then written as supplemental pages under those topics. Only records that cannot be confidently matched go to `Unsorted Communication Records`; `Telegram Records`, `Lark Records`, and `Email Records` are provenance channels, not long-term topic buckets.
 

@@ -36,6 +36,7 @@ SHARED_FILES = [
     "AI_Agent/Lab_Memory_Agent/scripts/notebook_pipeline/llm_provider.py",
     "AI_Agent/Lab_Memory_Agent/scripts/notebook_pipeline/distill_html_with_deepseek.py",
     "AI_Agent/Lab_Memory_Agent/scripts/notebook_pipeline/daily_notebook_update.py",
+    "AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/rag_query_engine.py",
     "AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/query_lab_notebook.py",
     "AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/serve_lab_senior_brother.py",
     "AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/telegram_lab_senior_brother.py",

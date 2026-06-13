@@ -33,6 +33,7 @@ DEFAULT_DISTILLATION_DIR = DEFAULT_PROCESSING / "html_deepseek_distilled"
 DEFAULT_STATE_DIR = DEFAULT_PROCESSING / "daily_updates"
 DEFAULT_CONFIG = DEFAULT_PROCESSING / "daily_update_config.json"
 DEFAULT_INCOMING_HTML_ROOT = DEFAULT_PROCESSING / "html/incoming"
+RAG_SCRIPT_DIR = DEFAULT_ROOT / "AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts"
 
 
 def now_stamp() -> str:
@@ -571,6 +572,17 @@ def load_config(path: Path) -> dict[str, Any]:
     return read_json(path, {}) if path.exists() else {}
 
 
+def refresh_rag_index() -> dict[str, Any]:
+    try:
+        if str(RAG_SCRIPT_DIR) not in sys.path:
+            sys.path.insert(0, str(RAG_SCRIPT_DIR))
+        import rag_query_engine  # type: ignore
+
+        return rag_query_engine.refresh_index_quietly()
+    except Exception as exc:
+        return {"error": f"{type(exc).__name__}: {exc}"}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Daily incremental update for the ZZLab HTML notebook and LLM distillation.")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
@@ -655,6 +667,7 @@ def main() -> None:
         )
 
     save_state(args.state_dir, manifest, current_pages, current_texts, detected_at)
+    rag_index = refresh_rag_index()
     result = {
         "detected_at": detected_at,
         "pages": len(current_pages),
@@ -663,7 +676,12 @@ def main() -> None:
         "changelog_md": str(changelog_md),
         "pre_sync": pre_sync,
         "html_merge": merge_result,
-            "llm_distillation": deepseek_result,
+        "llm_distillation": deepseek_result,
+        "rag_index": {
+            "chunk_count": rag_index.get("chunk_count"),
+            "chunks_with_vectors": rag_index.get("chunks_with_vectors"),
+            "error": rag_index.get("error") or rag_index.get("embedding_error", ""),
+        },
     }
     print(json.dumps(result, ensure_ascii=False, indent=2))
 

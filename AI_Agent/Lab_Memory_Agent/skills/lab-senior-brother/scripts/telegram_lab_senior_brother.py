@@ -97,6 +97,12 @@ def default_config() -> dict[str, Any]:
         "rag_index_dir": str(DEFAULT_RAG_INDEX),
         "rag_candidate_k": 40,
         "allow_page_rag_fallback": True,
+        "anythingllm_base_url": "http://127.0.0.1:3001/api",
+        "anythingllm_workspace_slug": "",
+        "anythingllm_mode": "query",
+        "conversation_context_turns": 6,
+        "conversation_context_max_age_seconds": 1800,
+        "send_query_progress": True,
     }
 
 
@@ -169,6 +175,13 @@ def send_message(token: str, chat_id: int, text: str) -> None:
             },
             timeout=30,
         )
+
+
+def send_chat_action(token: str, chat_id: int, action: str = "typing") -> None:
+    try:
+        telegram_request(token, "sendChatAction", {"chat_id": chat_id, "action": action}, timeout=15)
+    except Exception:
+        pass
 
 
 def send_document(token: str, chat_id: int, path: Path, caption: str = "") -> None:
@@ -275,6 +288,210 @@ def set_chat_mode(state_path: Path, chat_id: int, mode: str) -> None:
 
 def get_chat_mode(state: dict[str, Any], chat_id: int) -> str:
     return str(state.get("chats", {}).get(str(chat_id), {}).get("mode", "ask"))
+
+
+def chat_state(state: dict[str, Any], chat_id: Any) -> dict[str, Any]:
+    return state.setdefault("chats", {}).setdefault(str(chat_id), {"mode": "ask"})
+
+
+def looks_like_followup(text: str) -> bool:
+    normalized = normalized_intent_text(text)
+    if not normalized:
+        return False
+    if len(normalized) <= 8:
+        return True
+    followup_markers = (
+        "那",
+        "这个",
+        "那个",
+        "它",
+        "上面",
+        "刚才",
+        "前面",
+        "后面",
+        "前者",
+        "后者",
+        "继续",
+        "展开",
+        "详细",
+        "具体",
+        "为什么",
+        "怎么",
+        "如何",
+        "多少",
+        "几",
+        "谁",
+        "哪",
+        "证据",
+        "来源",
+        "原文",
+        "链接",
+        "步骤",
+        "参数",
+        "价格",
+        "型号",
+        "时间",
+        "还有",
+        "呢",
+    )
+    if len(normalized) <= 28 and any(marker in normalized for marker in followup_markers):
+        return True
+    return bool(re.search(r"^(and|what about|how about|why|where|which|when|then)\b", text.strip(), flags=re.I))
+
+
+def recent_query_context(state: dict[str, Any], chat_id: Any, config: dict[str, Any]) -> list[dict[str, Any]]:
+    turns = chat_state(state, chat_id).get("conversation", [])
+    if not isinstance(turns, list):
+        return []
+    max_turns = max(1, min(int(config.get("conversation_context_turns", 6)), 10))
+    max_age = max(60, int(config.get("conversation_context_max_age_seconds", 1800)))
+    now = time.time()
+    recent: list[dict[str, Any]] = []
+    for turn in turns[-max_turns:]:
+        if not isinstance(turn, dict):
+            continue
+        timestamp = turn.get("timestamp")
+        try:
+            age = now - float(timestamp)
+        except (TypeError, ValueError):
+            age = 0
+        if age <= max_age:
+            recent.append(turn)
+    return recent[-max_turns:]
+
+
+def has_recent_query_context(state: dict[str, Any], chat_id: Any, config: dict[str, Any]) -> bool:
+    return bool(recent_query_context(state, chat_id, config))
+
+
+def context_for_prompt(turns: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    compact = []
+    for turn in turns[-6:]:
+        compact.append(
+            {
+                "user_text": str(turn.get("user_text", ""))[:300],
+                "standalone_question": str(turn.get("standalone_question", ""))[:400],
+                "answer": str(turn.get("answer", ""))[:600],
+                "evidence": turn.get("evidence", [])[:3] if isinstance(turn.get("evidence"), list) else [],
+            }
+        )
+    return compact
+
+
+def resolve_query_with_context(text: str, state: dict[str, Any], chat_id: Any, config: dict[str, Any]) -> dict[str, Any]:
+    stripped = text.strip()
+    turns = recent_query_context(state, chat_id, config)
+    if not turns or not looks_like_followup(stripped):
+        return {"question": stripped, "used_context": False, "reason": "", "progress_hint": stripped}
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "你是实验室大师兄的对话上下文整理器。"
+                "判断当前用户消息是不是承接上文的追问；如果是，把它改写成一个可以单独检索 notebook 的完整问题。"
+                "如果当前消息已经是新问题或独立问题，不要强行继承上文。"
+                "只输出 JSON，不回答事实内容。"
+            ),
+        },
+        {
+            "role": "user",
+            "content": json.dumps(
+                {
+                    "recent_turns": context_for_prompt(turns),
+                    "current_message": stripped,
+                    "output_schema": {
+                        "is_follow_up": "boolean",
+                        "standalone_question": "完整检索问题；如果不是追问就原样返回 current_message",
+                        "progress_hint": "10到24字，说明正在查的主题",
+                        "reason": "简短说明",
+                    },
+                },
+                ensure_ascii=False,
+            ),
+        },
+    ]
+    try:
+        data, _usage = llm_json(messages, model=str(config.get("llm_model") or DEFAULT_LLM_MODEL), timeout=45)
+        question = str(data.get("standalone_question") or stripped).strip()
+        used_context = bool(data.get("is_follow_up")) and bool(question)
+        return {
+            "question": question or stripped,
+            "used_context": used_context,
+            "reason": str(data.get("reason") or ""),
+            "progress_hint": str(data.get("progress_hint") or question or stripped),
+        }
+    except Exception as exc:
+        previous = turns[-1].get("standalone_question") or turns[-1].get("user_text") or ""
+        return {
+            "question": f"结合上文问题“{previous}”，继续回答：{stripped}",
+            "used_context": True,
+            "reason": f"context rewrite fallback after {type(exc).__name__}: {exc}",
+            "progress_hint": str(previous or stripped)[:40],
+        }
+
+
+def evidence_summary_for_state(result: dict[str, Any]) -> list[dict[str, str]]:
+    evidence = []
+    for item in result.get("evidence", [])[:3]:
+        evidence.append(
+            {
+                "section": str(item.get("section", ""))[:120],
+                "title": str(item.get("title", ""))[:160],
+                "source_type": str(item.get("source_type", ""))[:80],
+            }
+        )
+    return evidence
+
+
+def remember_query_context(state_path: Path, chat_id: Any, user_text: str, resolved: dict[str, Any], result: dict[str, Any]) -> None:
+    state = read_json(state_path, {"chats": {}})
+    entry = chat_state(state, chat_id)
+    turns = entry.setdefault("conversation", [])
+    if not isinstance(turns, list):
+        turns = []
+    answer = str(result.get("answer") or short_query_reply(str(resolved.get("question") or user_text), result))
+    turns.append(
+        {
+            "timestamp": time.time(),
+            "updated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "user_text": user_text[:500],
+            "standalone_question": str(resolved.get("question") or user_text)[:800],
+            "used_context": bool(resolved.get("used_context")),
+            "answer": answer[:900],
+            "evidence": evidence_summary_for_state(result),
+        }
+    )
+    entry["conversation"] = turns[-10:]
+    write_json(state_path, state)
+
+
+def query_progress_text(resolved: dict[str, Any]) -> str:
+    question = str(resolved.get("question") or "").strip()
+    hint = str(resolved.get("progress_hint") or question).strip()
+    hint = re.sub(r"\s+", " ", hint)[:80]
+    if resolved.get("used_context"):
+        return f"我接着上文查一下：{hint}\n会先翻 notebook、通信记录和附件索引。"
+    return f"我先查一下：{hint}\n会翻 notebook、通信记录和附件索引。"
+
+
+def run_query_interaction(
+    *,
+    token: str,
+    chat_id: int,
+    state: dict[str, Any],
+    state_path: Path,
+    config: dict[str, Any],
+    question_text: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    resolved = resolve_query_with_context(question_text, state, chat_id, config)
+    if config.get("send_query_progress", True):
+        send_chat_action(token, chat_id)
+        send_message(token, chat_id, query_progress_text(resolved))
+    result = query_notebook(str(resolved.get("question") or question_text), config)
+    send_message(token, chat_id, short_query_reply(str(resolved.get("question") or question_text), result))
+    send_query_detail_if_needed(token, chat_id, str(resolved.get("question") or question_text), result, config)
+    remember_query_context(state_path, chat_id, question_text, resolved, result)
+    return resolved, result
 
 
 def load_distilled_pages(path: Path = DEFAULT_DISTILLATION) -> list[dict[str, Any]]:
@@ -429,7 +646,8 @@ def deepseek_answer_from_evidence(question: str, evidence: list[dict[str, Any]],
             "content": (
                 "你是“实验室大师兄”。用 Telegram 适合的短回复回答，中文，自然，不要写“结论/置信度/score”。"
                 "必须忠于证据。如果证据无法直接回答，reply 必须是：师兄我也不知道，notebook 里没找到明确记录。"
-                "有证据时最多 6 行，先直接回答，再给关键做法/数量/参数。"
+                "有证据时给够信息，不要只回一句；通常 4 到 8 行，先直接回答，再给关键做法/数量/参数。"
+                "如果用户问怎么做、怎么测、为什么、证据在哪，要按步骤或要点说清楚。"
                 "如果同一证据里有多个测量值，优先给最新、最终、最明确的值，同时可用一句话提到早期/采购规格。"
                 "不要主动输出密码、token、密钥、序列号等敏感凭据，即使证据里出现了。只输出 JSON。"
             ),
@@ -455,7 +673,7 @@ def deepseek_answer_from_evidence(question: str, evidence: list[dict[str, Any]],
 
 def query_notebook(question: str, config: dict[str, Any]) -> dict[str, Any]:
     fallback_error = ""
-    if str(config.get("rag_engine", "chunk")) == "chunk":
+    if str(config.get("rag_engine", "chunk")).casefold() in {"chunk", "anythingllm"}:
         try:
             import rag_query_engine  # type: ignore
 
@@ -1234,6 +1452,10 @@ def handle_message(token: str, message: dict[str, Any], config: dict[str, Any], 
             append_chat_record(chat_id, user, message, config, "note", display_text, saved_files)
             send_message(token, chat_id, f"已记：{path.name}")
             return
+        if looks_like_followup(body) and has_recent_query_context(state, chat_id, config):
+            append_chat_record(chat_id, user, message, config, "query", body, saved_files)
+            run_query_interaction(token=token, chat_id=chat_id, state=state, state_path=state_path, config=config, question_text=body)
+            return
         route = deepseek_agent_route(body, mode, config)
         action = str(route.get("action", "unsupported"))
         route_body = str(route.get("body") or body).strip()
@@ -1278,9 +1500,7 @@ def handle_message(token: str, message: dict[str, Any], config: dict[str, Any], 
                 send_message(token, chat_id, "你想查什么？直接问我实验记录就行。")
                 return
             append_chat_record(chat_id, user, message, config, "query", route_body, saved_files)
-            result = query_notebook(route_body, config)
-            send_message(token, chat_id, short_query_reply(route_body, result))
-            send_query_detail_if_needed(token, chat_id, route_body, result, config)
+            run_query_interaction(token=token, chat_id=chat_id, state=state, state_path=state_path, config=config, question_text=route_body)
         else:
             reply = str(route.get("reply") or "这个动作我还没接到 Telegram 工具里。现在我能查 notebook、记笔记、找归档文件、加白名单。")
             append_chat_record(chat_id, user, message, config, "unsupported", display_text, saved_files)
@@ -1328,9 +1548,7 @@ def handle_message(token: str, message: dict[str, Any], config: dict[str, Any], 
                 append_chat_record(chat_id, user, message, config, "file_request", body)
                 return
         append_chat_record(chat_id, user, message, config, "query", body, saved_files)
-        result = query_notebook(body, config)
-        send_message(token, chat_id, short_query_reply(body, result))
-        send_query_detail_if_needed(token, chat_id, body, result, config)
+        run_query_interaction(token=token, chat_id=chat_id, state=state, state_path=state_path, config=config, question_text=body)
 
 
 def poll(token: str, config_path: Path, offset_path: Path, state_path: Path, once: bool = False) -> None:

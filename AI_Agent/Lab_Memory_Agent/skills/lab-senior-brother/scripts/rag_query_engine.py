@@ -5,9 +5,13 @@ import hashlib
 import html.parser
 import json
 import math
+import os
 import re
 import sys
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -20,6 +24,11 @@ DEFAULT_DISTILLATION = PROCESSING / "html_deepseek_distilled/DEEPSEEK_DISTILLATI
 DEFAULT_HTML_ROOT = PROCESSING / "html/active/Lab_Notebook_Original_2026-06-11"
 DEFAULT_INDEX_DIR = PROCESSING / "rag_chunk_index"
 DEFAULT_LLM_KEY = ZZLAB_ROOT / "Key/Qwen Key.txt"
+ANYTHINGLLM_KEY_CANDIDATES = (
+    ZZLAB_ROOT / "Key/AnythingLLM API Key.txt",
+    ZZLAB_ROOT / "Key/AnythingLLM Key.txt",
+    ZZLAB_ROOT / "Key/anythingllm_api_key.txt",
+)
 DEFAULT_LLM_MODEL = "qwen3.7-plus"
 DEFAULT_EMBEDDING_MODEL = "text-embedding-v4"
 DEFAULT_EMBEDDING_DIMENSIONS = 512
@@ -859,7 +868,8 @@ def answer_with_qwen(question: str, evidence: list[dict[str, Any]], config: dict
             "content": (
                 "你是“实验室大师兄”。用 Telegram/Lark 适合的短回复回答，中文，自然，别写“结论/置信度/score”。"
                 "必须忠于证据；证据无法直接回答时，reply 必须是：师兄我也不知道，notebook 里没找到明确记录。"
-                "有证据时最多 6 行，先直接回答，再给关键做法/数量/参数。"
+                "有证据时给够信息，不要只回一句；通常 4 到 8 行，先直接回答，再给关键做法/数量/参数。"
+                "如果用户问怎么做、怎么测、为什么、证据在哪，要按步骤或要点说清楚。"
                 "可以说“我看到的记录里...”，但不要机械列标签。"
                 "不要输出密码、token、密钥、验证码、个人登录信息。只输出 JSON。"
             ),
@@ -914,8 +924,120 @@ def evidence_record(chunk: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def read_secret_value(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def anythingllm_api_key(config: dict[str, Any]) -> str:
+    key = str(config.get("anythingllm_api_key") or os.environ.get("ANYTHINGLLM_API_KEY") or "").strip()
+    if key:
+        return key
+    path_value = str(config.get("anythingllm_api_key_path") or "").strip()
+    if path_value:
+        key = read_secret_value(Path(path_value).expanduser())
+        if key:
+            return key
+    for candidate in ANYTHINGLLM_KEY_CANDIDATES:
+        key = read_secret_value(candidate)
+        if key:
+            return key
+    return ""
+
+
+def anythingllm_base_url(config: dict[str, Any]) -> str:
+    raw = str(config.get("anythingllm_base_url") or os.environ.get("ANYTHINGLLM_BASE_URL") or "http://127.0.0.1:3001/api")
+    return raw.rstrip("/")
+
+
+def anythingllm_evidence(source: dict[str, Any], index: int) -> dict[str, Any]:
+    title = str(source.get("title") or source.get("name") or source.get("chunkSource") or f"AnythingLLM source {index}")
+    snippet = compact_whitespace(str(source.get("chunk") or source.get("text") or source.get("pageContent") or source.get("content") or ""))
+    source_url = str(source.get("url") or source.get("docpath") or source.get("location") or source.get("source") or "")
+    return {
+        "chunk_id": str(source.get("id") or source.get("uuid") or index),
+        "score": float(source.get("score") or source.get("similarity") or 0),
+        "source_type": "anythingllm",
+        "section": title,
+        "title": title,
+        "html": source_url,
+        "source_sha256": "",
+        "summary": snippet[:260],
+        "what_happened": [],
+        "important_facts": [],
+        "decisions_or_conclusions": [],
+        "open_questions_or_next_steps": [],
+        "people_organizations_equipment": [],
+        "tags": ["anythingllm"],
+        "attachments": [],
+        "source_snippet": snippet[:1400],
+        "date": "",
+        "author": "",
+    }
+
+
+def query_anythingllm(question: str, config: dict[str, Any]) -> dict[str, Any]:
+    slug = str(config.get("anythingllm_workspace_slug") or os.environ.get("ANYTHINGLLM_WORKSPACE_SLUG") or "").strip()
+    if not slug:
+        return {"error": "AnythingLLM 未配置 workspace slug：请设置 anythingllm_workspace_slug 或 ANYTHINGLLM_WORKSPACE_SLUG。"}
+    key = anythingllm_api_key(config)
+    if not key:
+        return {"error": "AnythingLLM 未配置 API key：请设置 anythingllm_api_key、ANYTHINGLLM_API_KEY 或 Key/AnythingLLM API Key.txt。"}
+    mode = str(config.get("anythingllm_mode") or "query").strip() or "query"
+    payload = {
+        "message": question,
+        "mode": mode,
+        "sessionId": str(config.get("anythingllm_session_id") or "zzlab-big-brother"),
+    }
+    url = f"{anythingllm_base_url(config)}/v1/workspace/{urllib.parse.quote(slug)}/chat"
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=int(config.get("query_timeout_seconds", 60)) + 15) as response:
+            data = json.loads(response.read().decode("utf-8", errors="replace"))
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")[:500]
+        return {"error": f"AnythingLLM 查询失败：HTTP {exc.code}: {body}"}
+    except Exception as exc:
+        return {"error": f"AnythingLLM 查询失败：{type(exc).__name__}: {exc}"}
+    answer = str(data.get("textResponse") or data.get("text") or data.get("response") or data.get("message") or "").strip()
+    sources = data.get("sources") if isinstance(data.get("sources"), list) else []
+    evidence = [anythingllm_evidence(source, index) for index, source in enumerate(sources, start=1) if isinstance(source, dict)]
+    if not answer or (mode == "query" and not evidence):
+        answer = NOTEBOOK_UNKNOWN
+        evidence = []
+    return {
+        "query": question,
+        "engine": "anythingllm_api",
+        "likely_done_before": "yes" if evidence else "unknown",
+        "confidence": "anythingllm" if evidence else "low",
+        "top_score": evidence[0]["score"] if evidence else 0,
+        "evidence_count": len(evidence),
+        "evidence": evidence,
+        "answer": answer,
+        "anythingllm": {
+            "base_url": anythingllm_base_url(config),
+            "workspace_slug": slug,
+            "mode": mode,
+            "type": data.get("type", ""),
+        },
+    }
+
+
 def query_notebook(question: str, config: dict[str, Any] | None = None) -> dict[str, Any]:
     config = config or {}
+    if str(config.get("rag_engine", "chunk")).casefold() == "anythingllm":
+        return query_anythingllm(question, config)
     try:
         index_dir = Path(config.get("rag_index_dir") or DEFAULT_INDEX_DIR)
         chunks, manifest = load_index(index_dir)

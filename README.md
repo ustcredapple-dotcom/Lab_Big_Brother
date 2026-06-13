@@ -83,6 +83,23 @@ RAGFlow note:
 
 RAGFlow is a plausible future heavy backend if the lab wants a full RAG UI and document-processing platform. It is not the current default because this Mac currently has no Docker runtime installed, and the machine is ARM64 while RAGFlow's public prebuilt Docker images are x86-focused. Keep the local chunk RAG as the production path unless Docker/ARM64 RAGFlow deployment has been installed, tested, and wired through a backend switch.
 
+AnythingLLM note:
+
+AnythingLLM is the lighter off-the-shelf RAG candidate to test before RAGFlow. It has Desktop, Docker, and bare-metal deployment paths, a developer API, LanceDB by default, document pipelines, citations, and optional telemetry controls. For Telegram/Lark/email integration, prefer the API-capable Docker or server deployment rather than relying on the desktop UI. The code now has an optional `rag_engine=anythingllm` adapter that calls `/api/v1/workspace/{slug}/chat` in query mode. Keep current local chunk RAG live until AnythingLLM is installed, telemetry is disabled if needed, normalized lab exports are ingested, and regression questions pass.
+
+Minimum AnythingLLM config, once a service is running:
+
+```json
+{
+  "rag_engine": "anythingllm",
+  "anythingllm_base_url": "http://127.0.0.1:3001/api",
+  "anythingllm_workspace_slug": "zzlab",
+  "anythingllm_mode": "query"
+}
+```
+
+Put the API key in `Key/AnythingLLM API Key.txt` or provide `ANYTHINGLLM_API_KEY`.
+
 Telegram entrypoint:
 
 ```bash

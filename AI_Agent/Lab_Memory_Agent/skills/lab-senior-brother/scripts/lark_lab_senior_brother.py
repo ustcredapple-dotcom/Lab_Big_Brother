@@ -92,6 +92,10 @@ def default_config() -> dict[str, Any]:
         "query_timeout_seconds": 60,
         "send_html_details": True,
         "llm_model": DEFAULT_LLM_MODEL,
+        "rag_engine": "chunk",
+        "anythingllm_base_url": "http://127.0.0.1:3001/api",
+        "anythingllm_workspace_slug": "",
+        "anythingllm_mode": "query",
         "daily_root": str(DEFAULT_DAILY_ROOT),
         "lark_folder_name": DEFAULT_FOLDER_NAME,
         "notes_inbox": str(DEFAULT_INBOX),
@@ -100,6 +104,9 @@ def default_config() -> dict[str, Any]:
         "respond_in_group_only_when_mentioned": True,
         "bot_mention_names": ["大师兄", "实验室大师兄", "ZZLab Big Brother", "Lab Big Brother"],
         "record_all_joined_chats": True,
+        "conversation_context_turns": 6,
+        "conversation_context_max_age_seconds": 1800,
+        "send_query_progress": True,
     }
 
 
@@ -425,6 +432,19 @@ def render_query_detail_if_needed(client: Any, message_id: str, question: str, r
         send_file(client, message_id, detail_path, "查询详情 HTML")
 
 
+def run_query_interaction(client: Any, message_id: str, chat_id: str, question_text: str, config: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    state_key = f"lark:{chat_id}"
+    state = read_json(DEFAULT_STATE, {"chats": {}})
+    resolved = core.resolve_query_with_context(question_text, state, state_key, config)
+    if config.get("send_query_progress", True):
+        send_text(client, message_id, core.query_progress_text(resolved))
+    result = core.query_notebook(str(resolved.get("question") or question_text), config)
+    send_text(client, message_id, core.short_query_reply(str(resolved.get("question") or question_text), result))
+    render_query_detail_if_needed(client, message_id, str(resolved.get("question") or question_text), result, config)
+    core.remember_query_context(DEFAULT_STATE, state_key, question_text, resolved, result)
+    return resolved, result
+
+
 def message_file_items(message: Any) -> list[dict[str, Any]]:
     content = parse_content(message)
     message_type = str(getattr(message, "message_type", "") or "")
@@ -639,10 +659,12 @@ def handle_authorized_message(client: Any, message: Any, chat_id: str, sender: d
                 for item in matches:
                     send_file(client, message_id, Path(item["path"]), f"{item.get('file_name', '')}\n{item.get('context', '')[:500]}")
                 return
-        result = core.query_notebook(body, config)
-        send_text(client, message_id, core.short_query_reply(body, result))
-        render_query_detail_if_needed(client, message_id, body, result, config)
+        run_query_interaction(client, message_id, chat_id, body, config)
     else:
+        state = read_json(DEFAULT_STATE, {"chats": {}})
+        if core.looks_like_followup(body or text) and core.has_recent_query_context(state, f"lark:{chat_id}", config):
+            run_query_interaction(client, message_id, chat_id, body or text, config)
+            return
         route = core.deepseek_agent_route(body or text, "ask", config)
         action = str(route.get("action") or "unsupported")
         route_body = str(route.get("body") or body or text).strip()
@@ -665,9 +687,7 @@ def handle_authorized_message(client: Any, message: Any, chat_id: str, sender: d
             else:
                 send_text(client, message_id, "我没找到这个文件。你可以换个文件名、型号或关键词试试。")
         elif action == "query_notebook":
-            result = core.query_notebook(route_body, config)
-            send_text(client, message_id, core.short_query_reply(route_body, result))
-            render_query_detail_if_needed(client, message_id, route_body, result, config)
+            run_query_interaction(client, message_id, chat_id, route_body, config)
         else:
             send_text(client, message_id, str(route.get("reply") or "这个动作我还没接到 Lark 工具里。现在我能查 notebook、记笔记、找归档文件。"))
 

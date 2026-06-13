@@ -20,9 +20,9 @@ AI_Agent/Lab_Memory_Agent/
 
 ## 实验室大师兄
 
-`AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/` is the GPT-facing lab notebook query interface.
+`AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/` is the GPT-facing lab notebook RAG interface.
 
-Use it when asking whether the lab has done something before and how it was done. The skill queries the Qwen-distilled notebook index first, then points back to the source HTML evidence.
+Use it when asking whether the lab has done something before and how it was done. The skill retrieves relevant evidence, uses Qwen to reason over that evidence, then points back to the source HTML evidence. The old weighted keyword search is retained only as `--engine lexical`; normal CLI usage defaults to `--engine rag`.
 
 Example:
 

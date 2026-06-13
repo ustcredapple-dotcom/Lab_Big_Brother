@@ -5,11 +5,11 @@ description: Query and answer from the ZZLab lab notebook knowledge base. Use wh
 
 # 实验室大师兄
 
-Act as the lab's notebook database steward: first query the distilled index, then inspect source HTML when needed, then answer with evidence.
+Act as the lab's notebook RAG steward: retrieve relevant evidence, let Qwen reason over that evidence, inspect source HTML when needed, then answer with citations and uncertainty.
 
 ## Core Workflow
 
-1. Run the query script before answering factual notebook questions:
+1. Run the RAG query script before answering factual notebook questions:
 
 ```bash
 python /Volumes/ZZLab_AI/AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/query_lab_notebook.py \
@@ -18,7 +18,9 @@ python /Volumes/ZZLab_AI/AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scr
   --format json
 ```
 
-2. Read the returned evidence. If the top evidence is weak, run 1-2 alternative keyword queries.
+The default engine is `--engine rag`: Qwen selects evidence pages from the distilled directory and writes an answer from those pages. The old mechanical keyword engine remains available only for debugging with `--engine lexical`.
+
+2. Read the returned answer and evidence. If the evidence is weak, run 1-2 alternative natural-language or alias-expanded queries.
 3. If the answer depends on a detail not present in the distilled evidence, open the cited HTML file and inspect the source text around the snippet.
 4. Answer in this structure:
 
@@ -59,6 +61,8 @@ Do not write the real ngrok authtoken, Basic Auth password, Qwen key, or noteboo
 
 For current paths and source hierarchy, read `references/data_sources.md` when needed.
 
+For the intended RAG architecture and next implementation steps, read `references/rag_architecture.md`.
+
 Primary lookup index:
 
 `/Volumes/ZZLab_AI/Document/Lab_Notebook_Processing/html_deepseek_distilled/DEEPSEEK_DISTILLATION.json`
@@ -71,6 +75,7 @@ Source HTML root:
 
 - Do not answer from memory when the question is about lab history; query first.
 - Treat Qwen distillation as a navigation layer, not the source of truth.
+- Treat RAG as evidence retrieval plus grounded generation, not as keyword lookup.
 - Prefer source HTML citations for final answers.
 - Do not expose keys, passwords, cookies, or notebook sharing secrets.
 - If no evidence is found, say so plainly and suggest likely query terms or source areas to inspect.

@@ -31,6 +31,7 @@ SHARED_FILES = [
     "AI_Agent/Lab_Memory_Agent/requirements.txt",
     "AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/SKILL.md",
     "AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/references/data_sources.md",
+    "AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/references/rag_architecture.md",
     "AI_Agent/Lab_Memory_Agent/scripts/notebook_pipeline/README.md",
     "AI_Agent/Lab_Memory_Agent/scripts/notebook_pipeline/llm_provider.py",
     "AI_Agent/Lab_Memory_Agent/scripts/notebook_pipeline/distill_html_with_deepseek.py",

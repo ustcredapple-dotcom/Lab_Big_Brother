@@ -4,6 +4,7 @@ import argparse
 import html.parser
 import json
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,7 @@ from typing import Any
 DEFAULT_ROOT = Path("/Volumes/ZZLab_AI")
 DEFAULT_DISTILLATION = DEFAULT_ROOT / "Document/Lab_Notebook_Processing/html_deepseek_distilled/DEEPSEEK_DISTILLATION.json"
 DEFAULT_HTML_ROOT = DEFAULT_ROOT / "Document/Lab_Notebook_Processing/html/active/Lab_Notebook_Original_2026-06-11"
+SCRIPT_DIR = Path(__file__).resolve().parent
 
 
 class TextParser(html.parser.HTMLParser):
@@ -217,6 +219,7 @@ def search(query: str, distillation: Path, html_root: Path, top_k: int, include_
         likely_done = "unknown"
         confidence = "low"
     return {
+        "engine": "lexical_weighted_distillation",
         "query": query,
         "likely_done_before": likely_done,
         "confidence": confidence,
@@ -244,13 +247,48 @@ def search(query: str, distillation: Path, html_root: Path, top_k: int, include_
     }
 
 
+def rag_search(query: str, distillation: Path, html_root: Path, top_k: int, include_source_snippets: bool) -> dict[str, Any]:
+    if str(SCRIPT_DIR) not in sys.path:
+        sys.path.insert(0, str(SCRIPT_DIR))
+    import telegram_lab_senior_brother as rag_core  # type: ignore
+
+    rag_core.DEFAULT_DISTILLATION = distillation
+    rag_core.DEFAULT_HTML_ROOT = html_root
+    config = rag_core.default_config()
+    config["default_top_k"] = top_k
+    result = rag_core.query_notebook(query, config)
+    if result.get("error"):
+        return {
+            "engine": "qwen_rag_distilled_directory",
+            "query": query,
+            "likely_done_before": "unknown",
+            "confidence": "low",
+            "top_score": 0,
+            "evidence_count": 0,
+            "evidence": [],
+            "answer": result["error"],
+        }
+    result["engine"] = "qwen_rag_distilled_directory"
+    if not include_source_snippets:
+        for item in result.get("evidence", []):
+            item.pop("source_snippet", None)
+    return result
+
+
 def render_text(result: dict[str, Any]) -> str:
+    top_score = result.get("top_score") or 0
+    try:
+        top_score_text = f"{float(top_score):.1f}"
+    except (TypeError, ValueError):
+        top_score_text = str(top_score)
     lines = [
         f"Query: {result['query']}",
-        f"Likely done before: {result['likely_done_before']} (confidence: {result['confidence']}, top score: {result['top_score']:.1f})",
-        "",
-        "Evidence:",
+        f"Engine: {result.get('engine', 'unknown')}",
+        f"Likely done before: {result['likely_done_before']} (confidence: {result['confidence']}, top score: {top_score_text})",
     ]
+    if result.get("answer"):
+        lines.extend(["", "Answer:", str(result["answer"])])
+    lines.extend(["", "Evidence:"])
     for index, item in enumerate(result["evidence"], start=1):
         lines.extend(
             [
@@ -276,8 +314,9 @@ def render_text(result: dict[str, Any]) -> str:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Query the ZZLab notebook DeepSeek distillation and source HTML.")
+    parser = argparse.ArgumentParser(description="Query the ZZLab notebook RAG index and source HTML.")
     parser.add_argument("query", help="Question or keywords to search for.")
+    parser.add_argument("--engine", choices=("rag", "lexical"), default="rag", help="Use Qwen RAG evidence selection by default; lexical keeps the old weighted keyword search.")
     parser.add_argument("--distillation", type=Path, default=DEFAULT_DISTILLATION)
     parser.add_argument("--html-root", type=Path, default=DEFAULT_HTML_ROOT)
     parser.add_argument("--top-k", type=int, default=5)
@@ -285,7 +324,10 @@ def main() -> None:
     parser.add_argument("--format", choices=("text", "json"), default="text")
     args = parser.parse_args()
 
-    result = search(args.query, args.distillation, args.html_root, args.top_k, args.include_source_snippets)
+    if args.engine == "lexical":
+        result = search(args.query, args.distillation, args.html_root, args.top_k, args.include_source_snippets)
+    else:
+        result = rag_search(args.query, args.distillation, args.html_root, args.top_k, args.include_source_snippets)
     if args.format == "json":
         print(json.dumps(result, ensure_ascii=False, indent=2))
     else:

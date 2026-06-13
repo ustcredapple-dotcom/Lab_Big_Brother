@@ -5,6 +5,8 @@ description: Use this skill when answering questions from a portable lab memory 
 
 # Lab Memory
 
+Chinese human-readable companion: `SKILL_zh.md`.
+
 This skill is a thin operating guide for a portable AI memory pack. The memory itself lives in `entries/`, with raw evidence in `sources/` and rebuildable indices in `indices/`.
 
 ## Workflow

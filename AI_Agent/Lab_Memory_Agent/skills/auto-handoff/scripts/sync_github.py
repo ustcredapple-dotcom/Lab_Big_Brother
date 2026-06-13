@@ -17,6 +17,7 @@ ALLOWED_PRIVATE_TREE_EXCEPTIONS = {
     "AI_Agent/Lab_Memory_Agent/entries/2026-06-11-auto-work-handoff.md",
     "AI_Agent/Lab_Memory_Agent/entries/2026-06-11-example.md",
     "AI_Agent/Lab_Memory_Agent/inbox/README.md",
+    "AI_Agent/Lab_Memory_Agent/inbox/README_zh.md",
     "AI_Agent/Lab_Memory_Agent/sources/example-source.md",
 }
 DENIED_EXACT = {

@@ -1,5 +1,7 @@
 # Lab Notebook HTML Pipeline
 
+中文人类版：`README_zh.md`。
+
 This directory contains the public-safe code for the active lab notebook workflow.
 
 ## Current Workflow

@@ -5,6 +5,8 @@ description: Query and answer from the ZZLab lab notebook knowledge base. Use wh
 
 # 实验室大师兄
 
+Chinese human-readable companion: `SKILL_zh.md`.
+
 Act as the lab's notebook RAG steward: retrieve relevant evidence, let Qwen reason over that evidence, inspect source HTML when needed, then answer with citations and uncertainty.
 
 ## Core Workflow

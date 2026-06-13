@@ -1,5 +1,7 @@
 # 实验室大师兄数据源
 
+中文人类版：`data_sources_zh.md`。
+
 Use these files as the current notebook knowledge base:
 
 - Qwen distilled index: `/Volumes/ZZLab_AI/Document/Lab_Notebook_Processing/html_deepseek_distilled/DEEPSEEK_DISTILLATION.json`

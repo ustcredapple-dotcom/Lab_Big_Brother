@@ -23,6 +23,7 @@ AI_Agent/Lab_Memory_Agent/logs/
 # Imported laboratory material is private by default.
 AI_Agent/Lab_Memory_Agent/inbox/*
 !AI_Agent/Lab_Memory_Agent/inbox/README.md
+!AI_Agent/Lab_Memory_Agent/inbox/README_zh.md
 AI_Agent/Lab_Memory_Agent/sources/*
 !AI_Agent/Lab_Memory_Agent/sources/example-source.md
 AI_Agent/Lab_Memory_Agent/entries/*

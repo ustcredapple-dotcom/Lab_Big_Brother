@@ -10,6 +10,7 @@ from pathlib import Path
 
 
 HANDOFF_RELATIVE = Path("PROJECT_HANDOFF.md")
+HANDOFF_ZH_RELATIVE = Path("Document/Human_Docs_ZH/PROJECT_HANDOFF_zh.md")
 LOG_RELATIVE = Path(
     "Document/AI_Agent_Migration_2026-06-11/conversation_records/WORK_LOG.md"
 )
@@ -140,6 +141,60 @@ def render_current(data: dict, timestamp: str) -> str:
 """
 
 
+def render_current_zh(data: dict, timestamp: str) -> str:
+    return f"""# ZZLab AI 当前交接快照
+
+> 这是 `PROJECT_HANDOFF.md` 的中文人类版，保存在私有 `Document/` 目录下，不进入公开 GitHub。详细历史见工作日志。
+
+- 最近更新: {timestamp}
+- 更新者: {data['actor']}
+- Session ID: `{data['session_id']}`
+
+## 当前目标
+
+{data['objective']}
+
+## 当前状态
+
+{bullets(data['state'])}
+
+## 最新完成
+
+{bullets(data['completed'])}
+
+## 已做决策
+
+{bullets(data['decisions'])}
+
+## 当前 Blocker
+
+{bullets(data['blockers'], 'No active blocker recorded.')}
+
+## 下一步
+
+{numbered(data['next_actions'])}
+
+## 下个 AI 先读
+
+{bullets(data['files_to_read'])}
+
+## 本次改动文件
+
+{bullets(data['changed_files'])}
+
+## 备注
+
+{bullets(data['notes'])}
+
+## 交接规则
+
+- 修改项目前先读 `AGENTS.md` 和 `PROJECT_HANDOFF.md`。
+- 显著工作结束后，用 `auto-handoff` 更新当前快照并追加工作日志。
+- 需要长期可检索的实验室事实，放进 `AI_Agent/Lab_Memory_Agent/entries/` 并附来源。
+- 永远不要把密码、token、cookie 或私钥写进交接文档。
+"""
+
+
 def render_log_entry(data: dict, timestamp: str) -> str:
     return f"""
 
@@ -204,9 +259,11 @@ def main() -> None:
     data = normalize(read_payload(args.input))
     root = Path(args.root).expanduser().resolve() if args.root else default_root()
     handoff_path = root / HANDOFF_RELATIVE
+    handoff_zh_path = root / HANDOFF_ZH_RELATIVE
     log_path = root / LOG_RELATIVE
     timestamp = datetime.now().astimezone().isoformat(timespec="minutes")
     current = render_current(data, timestamp)
+    current_zh = render_current_zh(data, timestamp)
     marker = f"<!-- session_id: {data['session_id']} -->"
     if log_path.exists():
         log = log_path.read_text(encoding="utf-8")
@@ -218,14 +275,18 @@ def main() -> None:
 
     if args.dry_run:
         print(current)
+        print("\n--- PRIVATE CHINESE HANDOFF ---")
+        print(current_zh)
         print("\n--- WORK LOG ENTRY ---")
         print(render_log_entry(data, timestamp) if appended else "session already present")
         return
 
     atomic_write(handoff_path, current)
+    atomic_write(handoff_zh_path, current_zh)
     if appended:
         atomic_write(log_path, log)
     print(f"updated {handoff_path}")
+    print(f"updated {handoff_zh_path}")
     print(f"{'appended to' if appended else 'already present in'} {log_path}")
 
     if not args.no_github_sync:

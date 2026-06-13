@@ -2,6 +2,8 @@
 
 Portable, auditable AI memory infrastructure for laboratory work.
 
+Chinese human-readable documentation starts at [`HUMAN_DOCS_ZH.md`](HUMAN_DOCS_ZH.md) and [`README_zh.md`](README_zh.md).
+
 The project separates evidence, structured memory, search indices, and AI operating skills so the same knowledge base can move between computers and AI agents without depending on chat history.
 
 ## Core Layout

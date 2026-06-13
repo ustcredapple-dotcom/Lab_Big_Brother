@@ -1,5 +1,7 @@
 # Inbox
 
+中文人类版：`README_zh.md`。
+
 Put exported OneNote materials here before running:
 
 ```powershell

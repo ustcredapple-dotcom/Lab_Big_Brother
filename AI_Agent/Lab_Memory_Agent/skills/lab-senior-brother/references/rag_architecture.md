@@ -1,5 +1,7 @@
 # Lab Big Brother RAG Architecture
 
+Chinese human-readable version: `rag_architecture_zh.md`.
+
 ## What RAG Means Here
 
 RAG means retrieval-augmented generation:

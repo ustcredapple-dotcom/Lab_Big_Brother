@@ -7,12 +7,15 @@ import os
 import re
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 
@@ -120,13 +123,19 @@ def default_config() -> dict[str, Any]:
         "persistent_record_kinds": ["chat", "note", "file", "mode", "admin"],
         "digest_memory_kinds": ["chat", "note", "file"],
         "respond_in_group_only_when_mentioned": True,
-        "bot_mention_names": ["大师兄", "实验室大师兄", "ZZLab Big Brother", "Lab Big Brother"],
+        "bot_mention_names": ["大师兄", "实验室大师兄", "ZZLab Big Bro", "ZZLab Big Brother", "Lab Big Brother"],
         "record_all_joined_chats": True,
         "ignore_app_senders": True,
         "log_received_events": True,
         "conversation_context_turns": 6,
         "conversation_context_max_age_seconds": 1800,
         "send_query_progress": True,
+        "enable_polling_fallback": True,
+        "polling_interval_seconds": 20,
+        "polling_page_size": 20,
+        "polling_bootstrap_mark_seen": True,
+        "polling_seen_message_limit": 5000,
+        "polling_extra_chat_ids": [],
     }
 
 
@@ -168,13 +177,347 @@ def online_check(config: dict[str, Any], credentials: dict[str, str]) -> dict[st
             bot_data = json.loads(response.read().decode("utf-8", errors="replace"))
         result["bot_check_code"] = bot_data.get("code")
         result["bot_check_msg"] = bot_data.get("msg")
-        result["bot_enabled"] = bool(bot_data.get("bot") or bot_data.get("data")) and bot_data.get("code") == 0
+        bot_info = bot_data.get("bot") or bot_data.get("data") or {}
+        result["bot_enabled"] = bool(bot_info) and bot_data.get("code") == 0
+        if isinstance(bot_info, dict):
+            result["bot_name"] = bot_info.get("app_name") or bot_info.get("name") or ""
+            result["bot_open_id_present"] = bool(bot_info.get("open_id"))
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")[:500]
         result["error"] = f"HTTP {exc.code}: {redact_secrets(body)}"
     except Exception as exc:
         result["error"] = f"{type(exc).__name__}: {redact_secrets(str(exc))}"
     return result
+
+
+def tenant_access_token(config: dict[str, Any], credentials: dict[str, str], cache: dict[str, Any] | None = None) -> str:
+    cache = cache if cache is not None else {}
+    cached = str(cache.get("tenant_access_token") or "")
+    expires_at = float(cache.get("tenant_access_token_expires_at") or 0)
+    if cached and expires_at - 60 > time.time():
+        return cached
+
+    token_url = f"{str(config.get('base_url') or 'https://open.larksuite.com').rstrip('/')}/open-apis/auth/v3/tenant_access_token/internal"
+    payload = json.dumps({"app_id": credentials.get("app_id"), "app_secret": credentials.get("app_secret")}).encode("utf-8")
+    request = urllib.request.Request(
+        token_url,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=20) as response:
+        token_data = json.loads(response.read().decode("utf-8", errors="replace"))
+    if token_data.get("code") != 0 or not token_data.get("tenant_access_token"):
+        raise RuntimeError(f"Lark tenant token failed: code={token_data.get('code')} msg={token_data.get('msg')}")
+    token = str(token_data["tenant_access_token"])
+    try:
+        expires_in = int(token_data.get("expire") or token_data.get("expires_in") or 3600)
+    except (TypeError, ValueError):
+        expires_in = 3600
+    cache["tenant_access_token"] = token
+    cache["tenant_access_token_expires_at"] = time.time() + max(300, expires_in)
+    return token
+
+
+def lark_api_json(
+    config: dict[str, Any],
+    credentials: dict[str, str],
+    method: str,
+    path: str,
+    query: dict[str, Any] | None = None,
+    body: dict[str, Any] | None = None,
+    token_cache: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    base_url = str(config.get("base_url") or "https://open.larksuite.com").rstrip("/")
+    url = f"{base_url}{path}"
+    if query:
+        clean_query = {key: value for key, value in query.items() if value not in (None, "")}
+        if clean_query:
+            url += "?" + urllib.parse.urlencode(clean_query)
+    payload = json.dumps(body, ensure_ascii=False).encode("utf-8") if body is not None else None
+    headers = {
+        "Authorization": f"Bearer {tenant_access_token(config, credentials, token_cache)}",
+        "Content-Type": "application/json; charset=utf-8",
+    }
+    request = urllib.request.Request(url, data=payload, headers=headers, method=method.upper())
+    with urllib.request.urlopen(request, timeout=30) as response:
+        return json.loads(response.read().decode("utf-8", errors="replace"))
+
+
+def bot_identity(config: dict[str, Any], credentials: dict[str, str], token_cache: dict[str, Any] | None = None) -> dict[str, str]:
+    data = lark_api_json(config, credentials, "GET", "/open-apis/bot/v3/info", token_cache=token_cache)
+    bot = data.get("bot") or data.get("data") or {}
+    if not isinstance(bot, dict):
+        bot = {}
+    return {
+        "open_id": str(bot.get("open_id") or ""),
+        "name": str(bot.get("app_name") or bot.get("name") or ""),
+    }
+
+
+def list_visible_chats(config: dict[str, Any], credentials: dict[str, str], token_cache: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    page_size = int(config.get("polling_chat_page_size") or 100)
+    items: list[dict[str, Any]] = []
+    page_token = ""
+    for _ in range(20):
+        data = lark_api_json(
+            config,
+            credentials,
+            "GET",
+            "/open-apis/im/v1/chats",
+            query={"page_size": page_size, "page_token": page_token},
+            token_cache=token_cache,
+        )
+        if data.get("code") != 0:
+            raise RuntimeError(f"Lark chat list failed: code={data.get('code')} msg={data.get('msg')}")
+        payload = data.get("data") if isinstance(data.get("data"), dict) else {}
+        for item in payload.get("items") or []:
+            if isinstance(item, dict) and item.get("chat_id"):
+                items.append(item)
+        if not payload.get("has_more"):
+            break
+        page_token = str(payload.get("page_token") or "")
+        if not page_token:
+            break
+    return items
+
+
+def list_chat_messages(
+    chat_id: str,
+    config: dict[str, Any],
+    credentials: dict[str, str],
+    token_cache: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    page_size = int(config.get("polling_page_size") or 20)
+    data = lark_api_json(
+        config,
+        credentials,
+        "GET",
+        "/open-apis/im/v1/messages",
+        query={
+            "container_id_type": "chat",
+            "container_id": chat_id,
+            "page_size": page_size,
+            "sort_type": "ByCreateTimeDesc",
+        },
+        token_cache=token_cache,
+    )
+    if data.get("code") != 0:
+        raise RuntimeError(f"Lark message list failed for {chat_id}: code={data.get('code')} msg={data.get('msg')}")
+    payload = data.get("data") if isinstance(data.get("data"), dict) else {}
+    return [item for item in payload.get("items") or [] if isinstance(item, dict)]
+
+
+def read_state() -> dict[str, Any]:
+    state = read_json(DEFAULT_STATE, {"chats": {}})
+    return state if isinstance(state, dict) else {"chats": {}}
+
+
+def write_state(state: dict[str, Any]) -> None:
+    write_json(DEFAULT_STATE, state)
+
+
+def polling_state(state: dict[str, Any]) -> dict[str, Any]:
+    poll_state = state.setdefault("lark_polling", {})
+    if not isinstance(poll_state, dict):
+        poll_state = {}
+        state["lark_polling"] = poll_state
+    seen_ids = poll_state.setdefault("seen_message_ids", [])
+    if not isinstance(seen_ids, list):
+        poll_state["seen_message_ids"] = []
+    return poll_state
+
+
+def remember_seen_message_ids(state: dict[str, Any], message_ids: list[str], limit: int) -> None:
+    poll_state = polling_state(state)
+    seen = [str(item) for item in poll_state.get("seen_message_ids", []) if item]
+    seen_set = set(seen)
+    for message_id in message_ids:
+        if message_id and message_id not in seen_set:
+            seen.append(message_id)
+            seen_set.add(message_id)
+    poll_state["seen_message_ids"] = seen[-max(100, limit) :]
+    poll_state["updated_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def polled_sender(item: dict[str, Any]) -> Any:
+    sender = item.get("sender") if isinstance(item.get("sender"), dict) else {}
+    sender_id = str(sender.get("id") or "")
+    id_type = str(sender.get("id_type") or "")
+    return SimpleNamespace(
+        sender_id=SimpleNamespace(
+            open_id=sender_id if id_type == "open_id" else "",
+            user_id=sender_id if id_type == "user_id" else "",
+            union_id=sender_id if id_type == "union_id" else "",
+        ),
+        sender_type=str(sender.get("sender_type") or ""),
+        tenant_key=str(sender.get("tenant_key") or ""),
+    )
+
+
+def polled_mentions(item: dict[str, Any], config: dict[str, Any], identity: dict[str, str]) -> list[Any]:
+    names = {str(value).casefold() for value in config.get("bot_mention_names", [])}
+    bot_open_id = str(identity.get("open_id") or "")
+    bot_name = str(identity.get("name") or "")
+    if bot_name:
+        names.add(bot_name.casefold())
+    mentions = []
+    for raw in item.get("mentions") or []:
+        if not isinstance(raw, dict):
+            continue
+        mention_id = str(raw.get("id") or "")
+        name = str(raw.get("name") or "")
+        mentioned_type = ""
+        if (bot_open_id and mention_id == bot_open_id) or (name and name.casefold() in names):
+            mentioned_type = "bot"
+        mentions.append(
+            SimpleNamespace(
+                key=str(raw.get("key") or ""),
+                name=name,
+                id=mention_id,
+                id_type=str(raw.get("id_type") or ""),
+                mentioned_type=mentioned_type,
+            )
+        )
+    return mentions
+
+
+def polled_event(item: dict[str, Any], config: dict[str, Any], identity: dict[str, str], fallback_chat_type: str = "group") -> Any:
+    body = item.get("body") if isinstance(item.get("body"), dict) else {}
+    message = SimpleNamespace(
+        message_id=str(item.get("message_id") or ""),
+        chat_id=str(item.get("chat_id") or ""),
+        chat_type=str(item.get("chat_type") or fallback_chat_type or ""),
+        message_type=str(item.get("msg_type") or item.get("message_type") or ""),
+        content=str(body.get("content") or ""),
+        mentions=polled_mentions(item, config, identity),
+    )
+    return SimpleNamespace(event=SimpleNamespace(message=message, sender=polled_sender(item)))
+
+
+def audit_polling(status: str, config: dict[str, Any], **extra: Any) -> None:
+    if not config.get("log_received_events", True):
+        return
+    payload = {
+        "event": "lark_polling",
+        "status": status,
+        "time": datetime.now().astimezone().isoformat(timespec="seconds"),
+    }
+    payload.update(extra)
+    print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), flush=True)
+
+
+def poll_lark_once(client: Any, config_path: Path, credentials: dict[str, str], token_cache: dict[str, Any]) -> None:
+    config = load_config(config_path)
+    identity = bot_identity(config, credentials, token_cache)
+    chats = list_visible_chats(config, credentials, token_cache)
+    known_chat_ids = {str(chat.get("chat_id") or "") for chat in chats}
+    for chat_id in [*config.get("allowed_chat_ids", []), *config.get("polling_extra_chat_ids", [])]:
+        chat_id = str(chat_id)
+        if chat_id and chat_id not in known_chat_ids:
+            chats.append({"chat_id": chat_id, "chat_type": "group"})
+            known_chat_ids.add(chat_id)
+    state = read_state()
+    poll_state = polling_state(state)
+    seen = {str(item) for item in poll_state.get("seen_message_ids", []) if item}
+    bootstrapped_chat_ids = {str(item) for item in poll_state.get("bootstrapped_chat_ids", []) if item}
+    seen_limit = int(config.get("polling_seen_message_limit") or 5000)
+
+    fetched: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    for chat in chats:
+        chat_id = str(chat.get("chat_id") or "")
+        if not chat_id:
+            continue
+        try:
+            for item in list_chat_messages(chat_id, config, credentials, token_cache):
+                fetched.append((chat, item))
+        except Exception as exc:
+            audit_polling("chat_fetch_error", config, chat_id=chat_id, error=redact_secrets(f"{type(exc).__name__}: {exc}")[:500])
+
+    current_ids = [str(item.get("message_id") or "") for _chat, item in fetched if item.get("message_id")]
+    if config.get("polling_bootstrap_mark_seen", True) and not poll_state.get("bootstrapped"):
+        remember_seen_message_ids(state, current_ids, seen_limit)
+        polling_state(state)["bootstrapped"] = True
+        polling_state(state)["bootstrapped_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
+        polling_state(state)["bootstrapped_chat_ids"] = sorted({str(chat.get("chat_id") or "") for chat in chats if chat.get("chat_id")})
+        write_state(state)
+        audit_polling("bootstrapped", config, chat_count=len(chats), seen_count=len(current_ids), bot_name=identity.get("name", ""))
+        return
+
+    new_chat_ids = {
+        str(chat.get("chat_id") or "")
+        for chat in chats
+        if chat.get("chat_id") and str(chat.get("chat_id") or "") not in bootstrapped_chat_ids
+    }
+    if config.get("polling_bootstrap_mark_seen", True) and new_chat_ids:
+        bootstrap_ids = [
+            str(item.get("message_id") or "")
+            for chat, item in fetched
+            if str(chat.get("chat_id") or "") in new_chat_ids and item.get("message_id")
+        ]
+        remember_seen_message_ids(state, bootstrap_ids, seen_limit)
+        poll_state = polling_state(state)
+        poll_state["bootstrapped_chat_ids"] = sorted(bootstrapped_chat_ids | new_chat_ids)
+        poll_state["last_chat_bootstrap_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
+        write_state(state)
+        audit_polling("bootstrapped_new_chats", config, chat_count=len(new_chat_ids), seen_count=len(bootstrap_ids))
+        return
+
+    new_items = []
+    for chat, item in fetched:
+        message_id = str(item.get("message_id") or "")
+        if not message_id or message_id in seen:
+            continue
+        if str(item.get("msg_type") or "").casefold() == "system":
+            continue
+        new_items.append((chat, item))
+    new_items.sort(key=lambda pair: int(pair[1].get("create_time") or 0))
+
+    handled_ids: list[str] = []
+    for chat, item in new_items:
+        message_id = str(item.get("message_id") or "")
+        chat_type = str(chat.get("chat_mode") or chat.get("chat_type") or "group")
+        if chat_type not in {"p2p", "group"}:
+            chat_type = "group"
+        event = polled_event(item, config, identity, chat_type)
+        try:
+            handle_message(client, event, config_path)
+            audit_polling(
+                "handled",
+                config,
+                chat_id=str(item.get("chat_id") or ""),
+                chat_type=chat_type,
+                message_id_present=bool(message_id),
+                message_type=str(item.get("msg_type") or ""),
+            )
+        except Exception as exc:
+            audit_polling(
+                "handle_error",
+                config,
+                chat_id=str(item.get("chat_id") or ""),
+                message_id_present=bool(message_id),
+                error=redact_secrets(f"{type(exc).__name__}: {exc}")[:500],
+            )
+        if message_id:
+            handled_ids.append(message_id)
+    if handled_ids:
+        state = read_state()
+        remember_seen_message_ids(state, handled_ids, seen_limit)
+        polling_state(state)["bootstrapped_chat_ids"] = sorted({str(chat.get("chat_id") or "") for chat in chats if chat.get("chat_id")})
+        write_state(state)
+
+
+def polling_loop(client: Any, config_path: Path, credentials: dict[str, str]) -> None:
+    token_cache: dict[str, Any] = {}
+    while True:
+        config = load_config(config_path)
+        interval = max(5, int(config.get("polling_interval_seconds") or 20))
+        try:
+            if config.get("enable_polling_fallback", True):
+                poll_lark_once(client, config_path, credentials, token_cache)
+        except Exception as exc:
+            audit_polling("error", config, error=redact_secrets(f"{type(exc).__name__}: {exc}")[:500])
+        time.sleep(interval)
 
 
 def parse_key_value_text(text: str) -> dict[str, str]:
@@ -854,6 +1197,8 @@ def check_setup(config_path: Path, app_file: Path, encrypt_file: Path) -> dict[s
         "respond_in_group_only_when_mentioned": bool(config.get("respond_in_group_only_when_mentioned", True)),
         "ignore_app_senders": bool(config.get("ignore_app_senders", True)),
         "log_received_events": bool(config.get("log_received_events", True)),
+        "enable_polling_fallback": bool(config.get("enable_polling_fallback", True)),
+        "polling_interval_seconds": int(config.get("polling_interval_seconds") or 20),
     }
 
 
@@ -901,6 +1246,15 @@ def run(config_path: Path, app_file: Path, encrypt_file: Path) -> None:
         auto_reconnect=True,
         source="zzlab-lab-big-brother",
     )
+    if config.get("enable_polling_fallback", True):
+        thread = threading.Thread(
+            target=polling_loop,
+            args=(client, config_path, credentials),
+            name="lark-openapi-polling",
+            daemon=True,
+        )
+        thread.start()
+        print("实验室大师兄 Lark bot polling fallback started.", flush=True)
     print("实验室大师兄 Lark bot WebSocket started.", flush=True)
     ws_client.start()
 

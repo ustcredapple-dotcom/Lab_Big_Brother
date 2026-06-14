@@ -15,6 +15,11 @@
   "persistent_record_kinds": ["chat", "note", "file", "mode", "admin"],
   "digest_memory_kinds": ["chat", "note", "file"],
   "respond_in_group_only_when_mentioned": true,
-  "bot_mention_names": ["大师兄", "实验室大师兄", "ZZLab Big Brother", "Lab Big Brother"],
-  "record_all_joined_chats": true
+  "bot_mention_names": ["大师兄", "实验室大师兄", "ZZLab Big Bro", "ZZLab Big Brother", "Lab Big Brother"],
+  "record_all_joined_chats": true,
+  "enable_polling_fallback": true,
+  "polling_interval_seconds": 20,
+  "polling_page_size": 20,
+  "polling_bootstrap_mark_seen": true,
+  "polling_extra_chat_ids": []
 }

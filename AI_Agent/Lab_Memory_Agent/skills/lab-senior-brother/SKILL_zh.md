@@ -148,9 +148,9 @@ python /Volumes/ZZLab_AI/AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scr
 python /Volumes/ZZLab_AI/AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/lark_daily_digest.py
 ```
 
-Lark 使用国际版 `https://open.larksuite.com`，通过 WebSocket 收事件，不需要 ngrok。
+Lark 使用国际版 `https://open.larksuite.com`。主通道是官方 WebSocket 事件连接，同时默认启用 OpenAPI 主动轮询兜底，不需要 ngrok。
 
-bot 被拉进群后默认记录可收到的群消息。群里只有 @ 大师兄或显式命令时才回复；私聊可以直接回复。
+bot 被拉进群后默认记录可收到或轮询到的群消息。群里只有 @ 大师兄或显式命令时才回复。私聊在事件送达时可以直接回复；如果事件不送达，则需要 Lark API 能暴露该 p2p 会话，或把已知会话 ID 放进 `polling_extra_chat_ids`。
 
 在线诊断：
 

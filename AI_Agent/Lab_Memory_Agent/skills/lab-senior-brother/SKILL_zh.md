@@ -148,7 +148,7 @@ python /Volumes/ZZLab_AI/AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scr
 python /Volumes/ZZLab_AI/AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/lark_daily_digest.py
 ```
 
-Lark 使用国际版 `https://open.larksuite.com`。主通道是官方 WebSocket 事件连接，同时默认启用 OpenAPI 主动轮询兜底，不需要 ngrok。
+Lark 使用国际版 `https://open.larksuite.com`。主通道是官方 WebSocket 事件连接，同时默认启用 OpenAPI 主动轮询兜底，不需要 ngrok。正常情况下，`Receive message` 事件应该在用户 @ 它时立刻唤醒 bot；轮询只是事件不送达时的韧性兜底。默认消息轮询间隔是 5 秒，bot 身份缓存 5 分钟，可见群列表缓存 1 分钟。
 
 bot 被拉进群后默认记录可收到或轮询到的群消息。群里只有 @ 大师兄或显式命令时才回复。私聊在事件送达时可以直接回复；如果事件不送达，则需要 Lark API 能暴露该 p2p 会话，或把已知会话 ID 放进 `polling_extra_chat_ids`。
 

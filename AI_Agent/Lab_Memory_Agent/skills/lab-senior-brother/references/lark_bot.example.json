@@ -18,8 +18,10 @@
   "bot_mention_names": ["大师兄", "实验室大师兄", "ZZLab Big Bro", "ZZLab Big Brother", "Lab Big Brother"],
   "record_all_joined_chats": true,
   "enable_polling_fallback": true,
-  "polling_interval_seconds": 20,
+  "polling_interval_seconds": 5,
   "polling_page_size": 20,
+  "polling_chat_refresh_seconds": 60,
+  "polling_identity_refresh_seconds": 300,
   "polling_bootstrap_mark_seen": true,
   "polling_extra_chat_ids": []
 }

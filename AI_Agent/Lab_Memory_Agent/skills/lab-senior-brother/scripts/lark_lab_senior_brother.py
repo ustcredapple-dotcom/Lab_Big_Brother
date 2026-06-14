@@ -131,8 +131,10 @@ def default_config() -> dict[str, Any]:
         "conversation_context_max_age_seconds": 1800,
         "send_query_progress": True,
         "enable_polling_fallback": True,
-        "polling_interval_seconds": 20,
+        "polling_interval_seconds": 5,
         "polling_page_size": 20,
+        "polling_chat_refresh_seconds": 60,
+        "polling_identity_refresh_seconds": 300,
         "polling_bootstrap_mark_seen": True,
         "polling_seen_message_limit": 5000,
         "polling_extra_chat_ids": [],
@@ -255,6 +257,19 @@ def bot_identity(config: dict[str, Any], credentials: dict[str, str], token_cach
     }
 
 
+def cached_bot_identity(config: dict[str, Any], credentials: dict[str, str], cache: dict[str, Any]) -> dict[str, str]:
+    now = time.time()
+    ttl = max(60, int(config.get("polling_identity_refresh_seconds") or 300))
+    cached = cache.get("bot_identity")
+    expires_at = float(cache.get("bot_identity_expires_at") or 0)
+    if isinstance(cached, dict) and expires_at > now:
+        return {"open_id": str(cached.get("open_id") or ""), "name": str(cached.get("name") or "")}
+    identity = bot_identity(config, credentials, cache)
+    cache["bot_identity"] = identity
+    cache["bot_identity_expires_at"] = now + ttl
+    return identity
+
+
 def list_visible_chats(config: dict[str, Any], credentials: dict[str, str], token_cache: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     page_size = int(config.get("polling_chat_page_size") or 100)
     items: list[dict[str, Any]] = []
@@ -280,6 +295,19 @@ def list_visible_chats(config: dict[str, Any], credentials: dict[str, str], toke
         if not page_token:
             break
     return items
+
+
+def cached_visible_chats(config: dict[str, Any], credentials: dict[str, str], cache: dict[str, Any]) -> list[dict[str, Any]]:
+    now = time.time()
+    ttl = max(10, int(config.get("polling_chat_refresh_seconds") or 60))
+    cached = cache.get("visible_chats")
+    expires_at = float(cache.get("visible_chats_expires_at") or 0)
+    if isinstance(cached, list) and expires_at > now:
+        return [item for item in cached if isinstance(item, dict)]
+    chats = list_visible_chats(config, credentials, cache)
+    cache["visible_chats"] = chats
+    cache["visible_chats_expires_at"] = now + ttl
+    return chats
 
 
 def list_chat_messages(
@@ -409,8 +437,8 @@ def audit_polling(status: str, config: dict[str, Any], **extra: Any) -> None:
 
 def poll_lark_once(client: Any, config_path: Path, credentials: dict[str, str], token_cache: dict[str, Any]) -> None:
     config = load_config(config_path)
-    identity = bot_identity(config, credentials, token_cache)
-    chats = list_visible_chats(config, credentials, token_cache)
+    identity = cached_bot_identity(config, credentials, token_cache)
+    chats = cached_visible_chats(config, credentials, token_cache)
     known_chat_ids = {str(chat.get("chat_id") or "") for chat in chats}
     for chat_id in [*config.get("allowed_chat_ids", []), *config.get("polling_extra_chat_ids", [])]:
         chat_id = str(chat_id)
@@ -1199,6 +1227,8 @@ def check_setup(config_path: Path, app_file: Path, encrypt_file: Path) -> dict[s
         "log_received_events": bool(config.get("log_received_events", True)),
         "enable_polling_fallback": bool(config.get("enable_polling_fallback", True)),
         "polling_interval_seconds": int(config.get("polling_interval_seconds") or 20),
+        "polling_chat_refresh_seconds": int(config.get("polling_chat_refresh_seconds") or 60),
+        "polling_identity_refresh_seconds": int(config.get("polling_identity_refresh_seconds") or 300),
     }
 
 

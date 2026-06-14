@@ -135,7 +135,7 @@ python3 AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/lark_lab_sen
 python3 AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/lark_daily_digest.py
 ```
 
-Lark 使用国际版 `https://open.larksuite.com`，主通道是官方 WebSocket 事件连接，同时启用了 OpenAPI 主动轮询兜底，不需要 ngrok。bot 被拉进群后默认记录收到或轮询到的群消息；群里只有 @ 大师兄或使用命令时才回复。私聊在事件送达时可直接回复；如果事件不送达，则需要 Lark API 能暴露该 p2p 会话，或把已知会话 ID 放进 `polling_extra_chat_ids`。
+Lark 使用国际版 `https://open.larksuite.com`，主通道是官方 WebSocket 事件连接，同时启用了 OpenAPI 主动轮询兜底，不需要 ngrok。正常情况下，`Receive message` 事件应该在你 @ 它时立刻唤醒 bot；轮询只是事件不送达或延迟时的兜底。当前默认消息轮询间隔是 5 秒，bot 身份缓存 5 分钟，群列表缓存 1 分钟，避免过度刷 API。bot 被拉进群后默认记录收到或轮询到的群消息；群里只有 @ 大师兄或使用命令时才回复。私聊在事件送达时可直接回复；如果事件不送达，则需要 Lark API 能暴露该 p2p 会话，或把已知会话 ID 放进 `polling_extra_chat_ids`。
 
 要接收群里每一条消息，Lark app 需要授权官方 scope `Read all messages in associated group chat` 并订阅 `Receive message` 事件。
 

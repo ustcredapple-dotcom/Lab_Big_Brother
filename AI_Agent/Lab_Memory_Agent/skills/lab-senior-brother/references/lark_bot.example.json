@@ -23,5 +23,11 @@
   "polling_chat_refresh_seconds": 60,
   "polling_identity_refresh_seconds": 300,
   "polling_bootstrap_mark_seen": true,
-  "polling_extra_chat_ids": []
+  "polling_extra_chat_ids": [],
+  "backfill_new_chats": true,
+  "backfill_new_chat_page_size": 50,
+  "backfill_new_chat_max_messages": 0,
+  "backfill_new_chat_download_files": true,
+  "backfill_new_chat_include_system": false,
+  "backfill_new_chat_sleep_seconds": 0.2
 }

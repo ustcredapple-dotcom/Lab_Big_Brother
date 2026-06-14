@@ -138,6 +138,12 @@ def default_config() -> dict[str, Any]:
         "polling_bootstrap_mark_seen": True,
         "polling_seen_message_limit": 5000,
         "polling_extra_chat_ids": [],
+        "backfill_new_chats": True,
+        "backfill_new_chat_page_size": 50,
+        "backfill_new_chat_max_messages": 0,
+        "backfill_new_chat_download_files": True,
+        "backfill_new_chat_include_system": False,
+        "backfill_new_chat_sleep_seconds": 0.2,
     }
 
 
@@ -315,8 +321,22 @@ def list_chat_messages(
     config: dict[str, Any],
     credentials: dict[str, str],
     token_cache: dict[str, Any] | None = None,
+    page_token: str = "",
+    page_size: int | None = None,
 ) -> list[dict[str, Any]]:
-    page_size = int(config.get("polling_page_size") or 20)
+    data = list_chat_messages_page(chat_id, config, credentials, token_cache, page_token=page_token, page_size=page_size)
+    return data["items"]
+
+
+def list_chat_messages_page(
+    chat_id: str,
+    config: dict[str, Any],
+    credentials: dict[str, str],
+    token_cache: dict[str, Any] | None = None,
+    page_token: str = "",
+    page_size: int | None = None,
+) -> dict[str, Any]:
+    page_size = int(page_size or config.get("polling_page_size") or 20)
     data = lark_api_json(
         config,
         credentials,
@@ -327,13 +347,18 @@ def list_chat_messages(
             "container_id": chat_id,
             "page_size": page_size,
             "sort_type": "ByCreateTimeDesc",
+            "page_token": page_token,
         },
         token_cache=token_cache,
     )
     if data.get("code") != 0:
         raise RuntimeError(f"Lark message list failed for {chat_id}: code={data.get('code')} msg={data.get('msg')}")
     payload = data.get("data") if isinstance(data.get("data"), dict) else {}
-    return [item for item in payload.get("items") or [] if isinstance(item, dict)]
+    return {
+        "items": [item for item in payload.get("items") or [] if isinstance(item, dict)],
+        "has_more": bool(payload.get("has_more")),
+        "page_token": str(payload.get("page_token") or ""),
+    }
 
 
 def read_state() -> dict[str, Any]:
@@ -418,6 +443,8 @@ def polled_event(item: dict[str, Any], config: dict[str, Any], identity: dict[st
         chat_type=str(item.get("chat_type") or fallback_chat_type or ""),
         message_type=str(item.get("msg_type") or item.get("message_type") or ""),
         content=str(body.get("content") or ""),
+        create_time=str(item.get("create_time") or ""),
+        update_time=str(item.get("update_time") or ""),
         mentions=polled_mentions(item, config, identity),
     )
     return SimpleNamespace(event=SimpleNamespace(message=message, sender=polled_sender(item)))
@@ -433,6 +460,173 @@ def audit_polling(status: str, config: dict[str, Any], **extra: Any) -> None:
     }
     payload.update(extra)
     print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), flush=True)
+
+
+def message_file_error_records(message: Any, error: str) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for item in message_file_items(message):
+        records.append(
+            {
+                "kind": item.get("kind"),
+                "file_name": item.get("file_name"),
+                "mime_type": item.get("mime_type") or "",
+                "file_size": item.get("file_size"),
+                "classification": "download_error",
+                "download_error": redact_secrets(error)[:500],
+            }
+        )
+    return records
+
+
+def archive_message_silent(client: Any, event: Any, config: dict[str, Any], backfilled: bool = False, status: str = "backfilled_silent") -> dict[str, int]:
+    message = event.event.message
+    sender = sender_ids(event.event.sender)
+    chat_id = str(getattr(message, "chat_id", "") or "")
+    text = message_text(message)
+
+    if config.get("ignore_app_senders", True) and sender.get("sender_type", "").casefold() == "app":
+        audit_event(message, sender, text, config, "ignored_app_sender")
+        return {"records": 0, "files": 0, "errors": 0}
+
+    is_allowed = allowed(chat_id, sender, config)
+    if not is_allowed and not config.get("record_all_joined_chats", True):
+        audit_event(message, sender, text, config, "ignored_not_allowed")
+        return {"records": 0, "files": 0, "errors": 0}
+
+    files: list[dict[str, Any]] = []
+    errors = 0
+    if message_file_items(message):
+        if (not backfilled) or config.get("backfill_new_chat_download_files", True):
+            try:
+                files = save_message_files(client, message, chat_id, sender, config, text)
+            except Exception as exc:
+                errors += 1
+                error = f"{type(exc).__name__}: {exc}"
+                files = message_file_error_records(message, error)
+                audit_event(message, sender, text, config, "file_download_error", error)
+        else:
+            files = [
+                {
+                    "kind": item.get("kind"),
+                    "file_name": item.get("file_name"),
+                    "mime_type": item.get("mime_type") or "",
+                    "file_size": item.get("file_size"),
+                    "classification": "metadata_only_backfill",
+                }
+                for item in message_file_items(message)
+            ]
+
+    extra = {"archive_mode": "new_chat_backfill"} if backfilled else None
+    records = 0
+    if files:
+        append_chat_record(chat_id, sender, message, config, "file", text, files, responded=False, backfilled=backfilled, extra=extra)
+        records += 1
+    if text:
+        append_chat_record(chat_id, sender, message, config, "chat", text, files, responded=False, backfilled=backfilled, extra=extra)
+        records += 1
+    audit_event(message, sender, text, config, status)
+    return {"records": records, "files": len(files), "errors": errors}
+
+
+def backfill_new_chat(
+    client: Any,
+    chat: dict[str, Any],
+    config: dict[str, Any],
+    credentials: dict[str, str],
+    token_cache: dict[str, Any],
+    identity: dict[str, str],
+    already_seen: set[str],
+) -> dict[str, Any]:
+    chat_id = str(chat.get("chat_id") or "")
+    chat_type = str(chat.get("chat_mode") or chat.get("chat_type") or "group")
+    if chat_type not in {"p2p", "group"}:
+        chat_type = "group"
+    page_size = int(config.get("backfill_new_chat_page_size") or 50)
+    max_messages = int(config.get("backfill_new_chat_max_messages") or 0)
+    sleep_seconds = float(config.get("backfill_new_chat_sleep_seconds") or 0)
+    include_system = bool(config.get("backfill_new_chat_include_system", False))
+    message_ids: list[str] = []
+    items: list[dict[str, Any]] = []
+    page_token = ""
+    completed = True
+    fetch_errors: list[str] = []
+
+    audit_polling("backfill_new_chat_started", config, chat_id=chat_id, chat_name=str(chat.get("name") or ""), max_messages=max_messages)
+    while True:
+        try:
+            page = list_chat_messages_page(
+                chat_id,
+                config,
+                credentials,
+                token_cache,
+                page_token=page_token,
+                page_size=page_size,
+            )
+        except Exception as exc:
+            completed = False
+            fetch_errors.append(redact_secrets(f"{type(exc).__name__}: {exc}")[:500])
+            break
+        page_items = page["items"]
+        for item in page_items:
+            message_id = str(item.get("message_id") or "")
+            if message_id:
+                message_ids.append(message_id)
+            if message_id and message_id in already_seen:
+                continue
+            if (not include_system) and str(item.get("msg_type") or "").casefold() == "system":
+                continue
+            items.append(item)
+            if max_messages > 0 and len(items) >= max_messages:
+                break
+        if max_messages > 0 and len(items) >= max_messages:
+            break
+        if not page.get("has_more"):
+            break
+        page_token = str(page.get("page_token") or "")
+        if not page_token:
+            break
+        if sleep_seconds > 0:
+            time.sleep(sleep_seconds)
+
+    items.sort(key=lambda item: int(item.get("create_time") or 0))
+    archived_records = 0
+    archived_files = 0
+    archive_errors = 0
+    archived_ids: list[str] = []
+    for item in items:
+        event = polled_event(item, config, identity, chat_type)
+        stats = archive_message_silent(client, event, config, backfilled=True, status="backfilled_silent")
+        archived_records += stats["records"]
+        archived_files += stats["files"]
+        archive_errors += stats["errors"]
+        message_id = str(item.get("message_id") or "")
+        if message_id:
+            archived_ids.append(message_id)
+
+    summary = {
+        "chat_id": chat_id,
+        "chat_name": str(chat.get("name") or ""),
+        "completed": completed,
+        "fetched_message_ids": len(set(message_ids)),
+        "archived_messages": len(archived_ids),
+        "archived_records": archived_records,
+        "archived_files": archived_files,
+        "archive_errors": archive_errors,
+        "fetch_errors": fetch_errors,
+        "finished_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+    }
+    audit_polling(
+        "backfill_new_chat_finished" if completed else "backfill_new_chat_incomplete",
+        config,
+        chat_id=chat_id,
+        fetched_message_ids=summary["fetched_message_ids"],
+        archived_messages=summary["archived_messages"],
+        archived_files=archived_files,
+        archive_errors=archive_errors,
+        fetch_errors=len(fetch_errors),
+    )
+    summary["message_ids"] = sorted(set(message_ids + archived_ids))
+    return summary
 
 
 def poll_lark_once(client: Any, config_path: Path, credentials: dict[str, str], token_cache: dict[str, Any]) -> None:
@@ -478,17 +672,43 @@ def poll_lark_once(client: Any, config_path: Path, credentials: dict[str, str], 
         if chat.get("chat_id") and str(chat.get("chat_id") or "") not in bootstrapped_chat_ids
     }
     if config.get("polling_bootstrap_mark_seen", True) and new_chat_ids:
-        bootstrap_ids = [
-            str(item.get("message_id") or "")
-            for chat, item in fetched
-            if str(chat.get("chat_id") or "") in new_chat_ids and item.get("message_id")
-        ]
+        bootstrap_ids: list[str] = []
+        completed_chat_ids: set[str] = set()
+        backfill_summaries = polling_state(state).setdefault("new_chat_backfills", {})
+        if not isinstance(backfill_summaries, dict):
+            backfill_summaries = {}
+            polling_state(state)["new_chat_backfills"] = backfill_summaries
+        for chat in chats:
+            chat_id = str(chat.get("chat_id") or "")
+            if chat_id not in new_chat_ids:
+                continue
+            if config.get("backfill_new_chats", True):
+                summary = backfill_new_chat(client, chat, config, credentials, token_cache, identity, seen)
+                bootstrap_ids.extend([str(item) for item in summary.pop("message_ids", []) if item])
+                backfill_summaries[chat_id] = summary
+                if summary.get("completed"):
+                    completed_chat_ids.add(chat_id)
+            else:
+                chat_bootstrap_ids = [
+                    str(item.get("message_id") or "")
+                    for fetched_chat, item in fetched
+                    if str(fetched_chat.get("chat_id") or "") == chat_id and item.get("message_id")
+                ]
+                bootstrap_ids.extend(chat_bootstrap_ids)
+                completed_chat_ids.add(chat_id)
         remember_seen_message_ids(state, bootstrap_ids, seen_limit)
         poll_state = polling_state(state)
-        poll_state["bootstrapped_chat_ids"] = sorted(bootstrapped_chat_ids | new_chat_ids)
+        poll_state["bootstrapped_chat_ids"] = sorted(bootstrapped_chat_ids | completed_chat_ids)
         poll_state["last_chat_bootstrap_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
         write_state(state)
-        audit_polling("bootstrapped_new_chats", config, chat_count=len(new_chat_ids), seen_count=len(bootstrap_ids))
+        audit_polling(
+            "bootstrapped_new_chats",
+            config,
+            chat_count=len(completed_chat_ids),
+            pending_chat_count=len(new_chat_ids - completed_chat_ids),
+            seen_count=len(set(bootstrap_ids)),
+            backfill_enabled=bool(config.get("backfill_new_chats", True)),
+        )
         return
 
     new_items = []
@@ -671,6 +891,16 @@ def daily_sender_dir(chat_id: str, sender: dict[str, str], config: dict[str, Any
     return path
 
 
+def lark_timestamp_iso(value: str) -> str:
+    try:
+        timestamp = int(str(value))
+    except (TypeError, ValueError):
+        return ""
+    if timestamp > 10_000_000_000:
+        timestamp = timestamp / 1000
+    return datetime.fromtimestamp(timestamp).astimezone().isoformat(timespec="seconds")
+
+
 def append_chat_record(
     chat_id: str,
     sender: dict[str, str],
@@ -680,6 +910,8 @@ def append_chat_record(
     text: str = "",
     files: list[dict[str, Any]] | None = None,
     responded: bool = False,
+    backfilled: bool = False,
+    extra: dict[str, Any] | None = None,
 ) -> None:
     persistent_kinds = set(config.get("persistent_record_kinds") or default_config()["persistent_record_kinds"])
     if kind not in persistent_kinds:
@@ -696,9 +928,16 @@ def append_chat_record(
         "message_type": getattr(message, "message_type", None),
         "kind": kind,
         "responded": responded,
+        "backfilled": backfilled,
         "text": text,
         "files": files or [],
     }
+    raw_create_time = str(getattr(message, "create_time", "") or "")
+    if raw_create_time:
+        record["original_create_time"] = raw_create_time
+        record["original_created_at"] = lark_timestamp_iso(raw_create_time)
+    if extra:
+        record.update(extra)
     with (folder / "chat_records.jsonl").open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record, ensure_ascii=False) + "\n")
     with (folder / "chat_records.md").open("a", encoding="utf-8") as handle:
@@ -734,6 +973,32 @@ def collect_text_from_post(value: Any) -> list[str]:
     return texts
 
 
+def collect_readable_strings(value: Any) -> list[str]:
+    keys = {
+        "title",
+        "text",
+        "un_escape_text",
+        "url",
+        "href",
+        "file_name",
+        "name",
+        "doc_title",
+        "document_title",
+        "link",
+    }
+    texts: list[str] = []
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key in keys and isinstance(item, str):
+                texts.append(item)
+            else:
+                texts.extend(collect_readable_strings(item))
+    elif isinstance(value, list):
+        for item in value:
+            texts.extend(collect_readable_strings(item))
+    return texts
+
+
 def message_text(message: Any) -> str:
     content = parse_content(message)
     message_type = str(getattr(message, "message_type", "") or "")
@@ -744,6 +1009,8 @@ def message_text(message: Any) -> str:
         text = "\n".join([title, *collect_text_from_post(content)]).strip()
     else:
         text = str(content.get("text") or content.get("file_name") or content.get("image_key") or "")
+        if not text:
+            text = "\n".join(collect_readable_strings(content)[:40]).strip()
     for mention in getattr(message, "mentions", None) or []:
         key = str(getattr(mention, "key", "") or "")
         name = str(getattr(mention, "name", "") or "")
@@ -1229,6 +1496,10 @@ def check_setup(config_path: Path, app_file: Path, encrypt_file: Path) -> dict[s
         "polling_interval_seconds": int(config.get("polling_interval_seconds") or 20),
         "polling_chat_refresh_seconds": int(config.get("polling_chat_refresh_seconds") or 60),
         "polling_identity_refresh_seconds": int(config.get("polling_identity_refresh_seconds") or 300),
+        "backfill_new_chats": bool(config.get("backfill_new_chats", True)),
+        "backfill_new_chat_page_size": int(config.get("backfill_new_chat_page_size") or 50),
+        "backfill_new_chat_max_messages": int(config.get("backfill_new_chat_max_messages") or 0),
+        "backfill_new_chat_download_files": bool(config.get("backfill_new_chat_download_files", True)),
     }
 
 

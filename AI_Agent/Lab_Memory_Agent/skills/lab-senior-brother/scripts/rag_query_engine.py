@@ -581,11 +581,15 @@ def build_index(
 
     chunks_path, manifest_path = index_paths(index_dir)
     index_dir.mkdir(parents=True, exist_ok=True)
-    temporary_chunks = chunks_path.with_suffix(".jsonl.tmp")
-    with temporary_chunks.open("w", encoding="utf-8") as handle:
-        for chunk in chunks:
-            handle.write(json.dumps(chunk, ensure_ascii=False, separators=(",", ":")) + "\n")
-    temporary_chunks.replace(chunks_path)
+    temporary_chunks = chunks_path.with_name(f".{chunks_path.name}.{os.getpid()}.{int(time.time() * 1000)}.tmp")
+    try:
+        with temporary_chunks.open("w", encoding="utf-8") as handle:
+            for chunk in chunks:
+                handle.write(json.dumps(chunk, ensure_ascii=False, separators=(",", ":")) + "\n")
+        temporary_chunks.replace(chunks_path)
+    finally:
+        if temporary_chunks.exists():
+            temporary_chunks.unlink()
     manifest = {
         "generated_at": now_stamp(),
         "engine": "chunk_hybrid_qwen_rag",

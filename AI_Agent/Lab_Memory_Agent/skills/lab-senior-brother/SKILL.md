@@ -162,6 +162,8 @@ The Lark account uses the international Lark platform, so the default domain is 
 
 Lark runs through the official `lark-oapi` Python SDK and WebSocket events, so it does not need a public ngrok callback. Once the bot is added to a group, it records delivered group messages by default under `/Volumes/ZZLab_AI/YYYY-MM-DD/lark文档和消息记录/<sender>_<chat>/`. To receive every message in a group instead of only direct mentions, the Lark app must be granted the official scope `Read all messages in associated group chat` and subscribe to the `Receive message` event. In group chats it should remain quiet unless mentioned with `@大师兄` or called with explicit commands such as `/ask`, `/note`, `/help`, `/status`, or `/id`. In private chat it may answer directly. Files and images are archived automatically; PDFs/text-like files get text/HTML previews, images get Qwen vision previews, and binary engineering files are stored as metadata-only attachments.
 
+Use `lark_lab_senior_brother.py --check-online` for live diagnostics. `tenant_access_token_ok=true` validates the credentials; `bot_enabled=true` is required for chat install, message events, and replies. If Lark reports `app do not have bot`, the app's Bot capability is still missing even if other scopes were approved.
+
 The Lark daily digest runs topic-first, like Telegram/email, and should feed kept records into existing notebook sections through `topic_distillation.py`.
 
 ## Gmail Interface

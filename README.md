@@ -125,6 +125,14 @@ The Lark account uses the international Lark platform, so the default OpenAPI do
 
 Lark uses a WebSocket event connection, so it does not need ngrok. Once the bot is added to a group, it records delivered group messages by default under `/Volumes/ZZLab_AI/YYYY-MM-DD/lark文档和消息记录/`. To receive every message in a group instead of only direct mentions, the Lark app must be granted the official scope `Read all messages in associated group chat` and subscribe to the `Receive message` event. In group chats the bot stays quiet unless mentioned with `@大师兄` or called with commands such as `/ask`, `/note`, `/help`, `/status`, or `/id`. In private chat it can reply directly. Uploaded files and images are archived like Telegram files: text-like files and PDFs get extracts, images get Qwen vision previews, and binary engineering files are stored as metadata-only attachments. The nightly Lark digest is topic-first and should supplement existing notebook sections instead of creating a durable `Lark Records` topic.
 
+Lark diagnostic:
+
+```bash
+python3 AI_Agent/Lab_Memory_Agent/skills/lab-senior-brother/scripts/lark_lab_senior_brother.py --check-online
+```
+
+`tenant_access_token_ok=true` means the App ID/App Secret are valid. `bot_enabled=true` is also required before the app can be added to chats, receive message events, and reply as 大师兄. If Lark returns `app do not have bot`, enable the Bot capability in the Lark developer console and release/publish the app again.
+
 Install runtime dependencies with:
 
 ```bash

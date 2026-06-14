@@ -8,6 +8,8 @@ import re
 import sys
 import tempfile
 import time
+import urllib.error
+import urllib.request
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -80,6 +82,22 @@ def write_json(path: Path, value: Any) -> None:
     core.write_json(path, value)
 
 
+def load_config(path: Path = DEFAULT_CONFIG) -> dict[str, Any]:
+    raw = read_json(path, {}) if path.exists() else {}
+    config = default_config()
+    if isinstance(raw, dict):
+        config.update(raw)
+    return config
+
+
+def ensure_config_file(path: Path = DEFAULT_CONFIG) -> dict[str, Any]:
+    config = load_config(path)
+    raw = read_json(path, {}) if path.exists() else {}
+    if raw != config:
+        write_json(path, config)
+    return config
+
+
 def default_config() -> dict[str, Any]:
     return {
         "platform": "lark",
@@ -104,6 +122,8 @@ def default_config() -> dict[str, Any]:
         "respond_in_group_only_when_mentioned": True,
         "bot_mention_names": ["大师兄", "实验室大师兄", "ZZLab Big Brother", "Lab Big Brother"],
         "record_all_joined_chats": True,
+        "ignore_app_senders": True,
+        "log_received_events": True,
         "conversation_context_turns": 6,
         "conversation_context_max_age_seconds": 1800,
         "send_query_progress": True,
@@ -116,6 +136,45 @@ def redact_secrets(text: str) -> str:
     text = re.sub(r"(?i)(app[_ -]?secret[\"'=:\\s]+)[A-Za-z0-9_-]{8,}", r"\1<redacted>", text)
     text = re.sub(r"(?i)(encrypt[_ -]?key[\"'=:\\s]+)[A-Za-z0-9_-]{8,}", r"\1<redacted>", text)
     return text
+
+
+def online_check(config: dict[str, Any], credentials: dict[str, str]) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "tenant_access_token_ok": False,
+        "bot_enabled": False,
+        "bot_check_code": None,
+        "bot_check_msg": "",
+    }
+    try:
+        token_url = f"{str(config.get('base_url') or 'https://open.larksuite.com').rstrip('/')}/open-apis/auth/v3/tenant_access_token/internal"
+        payload = json.dumps({"app_id": credentials.get("app_id"), "app_secret": credentials.get("app_secret")}).encode("utf-8")
+        request = urllib.request.Request(
+            token_url,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=20) as response:
+            token_data = json.loads(response.read().decode("utf-8", errors="replace"))
+        result["tenant_access_token_code"] = token_data.get("code")
+        result["tenant_access_token_msg"] = token_data.get("msg")
+        token = str(token_data.get("tenant_access_token") or "")
+        result["tenant_access_token_ok"] = bool(token) and token_data.get("code") == 0
+        if not token:
+            return result
+        bot_url = f"{str(config.get('base_url') or 'https://open.larksuite.com').rstrip('/')}/open-apis/bot/v3/info"
+        bot_request = urllib.request.Request(bot_url, headers={"Authorization": f"Bearer {token}"})
+        with urllib.request.urlopen(bot_request, timeout=20) as response:
+            bot_data = json.loads(response.read().decode("utf-8", errors="replace"))
+        result["bot_check_code"] = bot_data.get("code")
+        result["bot_check_msg"] = bot_data.get("msg")
+        result["bot_enabled"] = bool(bot_data.get("bot") or bot_data.get("data")) and bot_data.get("code") == 0
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")[:500]
+        result["error"] = f"HTTP {exc.code}: {redact_secrets(body)}"
+    except Exception as exc:
+        result["error"] = f"{type(exc).__name__}: {redact_secrets(str(exc))}"
+    return result
 
 
 def parse_key_value_text(text: str) -> dict[str, str]:
@@ -200,6 +259,29 @@ def sender_ids(sender: Any) -> dict[str, str]:
         "sender_type": str(getattr(sender, "sender_type", "") or ""),
         "tenant_key": str(getattr(sender, "tenant_key", "") or ""),
     }
+
+
+def audit_event(message: Any, sender: dict[str, str], text: str, config: dict[str, Any], status: str, error: str = "") -> None:
+    if not config.get("log_received_events", True):
+        return
+    payload = {
+        "event": "lark_message",
+        "status": status,
+        "time": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "chat_id": str(getattr(message, "chat_id", "") or ""),
+        "chat_type": str(getattr(message, "chat_type", "") or ""),
+        "message_type": str(getattr(message, "message_type", "") or ""),
+        "message_id_present": bool(getattr(message, "message_id", "")),
+        "sender_type": sender.get("sender_type", ""),
+        "sender_open_id_present": bool(sender.get("open_id")),
+        "text_len": len(text or ""),
+        "file_item_count": len(message_file_items(message)),
+        "should_reply": should_reply(message, text or "", config),
+        "record_all_joined_chats": bool(config.get("record_all_joined_chats", True)),
+    }
+    if error:
+        payload["error"] = redact_secrets(error)[:500]
+    print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), flush=True)
 
 
 def allowed(chat_id: str, sender: dict[str, str], config: dict[str, Any]) -> bool:
@@ -693,12 +775,16 @@ def handle_authorized_message(client: Any, message: Any, chat_id: str, sender: d
 
 
 def handle_message(client: Any, event: Any, config_path: Path) -> None:
-    config = read_json(config_path, default_config())
+    config = load_config(config_path)
     message = event.event.message
     sender = sender_ids(event.event.sender)
     chat_id = str(getattr(message, "chat_id", "") or "")
     text = message_text(message)
     message_id = str(getattr(message, "message_id", "") or "")
+
+    if config.get("ignore_app_senders", True) and sender.get("sender_type", "").casefold() == "app":
+        audit_event(message, sender, text, config, "ignored_app_sender")
+        return
 
     if parse_command(text)[0] == "id":
         if config.get("allow_registration_mode", True):
@@ -712,10 +798,12 @@ def handle_message(client: Any, event: Any, config_path: Path) -> None:
                 "默认策略：bot 被拉进群后就会记录该群消息；群里 @ 大师兄或发命令时才回复。\n"
                 "这些 ID 只用于以后需要限制敏感工具或排查权限。"
             )
+        audit_event(message, sender, text, config, "replied_id")
         return
 
     is_allowed = allowed(chat_id, sender, config)
     if not is_allowed and not config.get("record_all_joined_chats", True):
+        audit_event(message, sender, text, config, "ignored_not_allowed")
         return
 
     files = save_message_files(client, message, chat_id, sender, config, text)
@@ -726,6 +814,7 @@ def handle_message(client: Any, event: Any, config_path: Path) -> None:
         append_chat_record(chat_id, sender, message, config, "chat", text, files, responded=False)
 
     if not is_allowed and not should_reply(message, text, config):
+        audit_event(message, sender, text, config, "recorded_silent")
         return
 
     if files and should_reply(message, text, config):
@@ -738,14 +827,18 @@ def handle_message(client: Any, event: Any, config_path: Path) -> None:
             detail.append(f"{metadata_only} 个仅存元数据")
         suffix = f"（{'，'.join(detail)}）" if detail else ""
         send_text(client, message_id, f"收到文件，已按当前上下文自动归档 {len(files)} 个{suffix}。")
+        audit_event(message, sender, text, config, "recorded_and_replied_file")
         return
 
     if text and should_reply(message, text, config):
         handle_authorized_message(client, message, chat_id, sender, text, config)
+        audit_event(message, sender, text, config, "recorded_and_replied")
+        return
+    audit_event(message, sender, text, config, "recorded_no_text")
 
 
 def check_setup(config_path: Path, app_file: Path, encrypt_file: Path) -> dict[str, Any]:
-    config = read_json(config_path, default_config()) if config_path.exists() else default_config()
+    config = load_config(config_path)
     credentials = read_lark_credentials(app_file, encrypt_file)
     return {
         "sdk": bool(lark is not None),
@@ -757,15 +850,17 @@ def check_setup(config_path: Path, app_file: Path, encrypt_file: Path) -> dict[s
         "encrypt_key_present": bool(credentials.get("encrypt_key")),
         "allowed_chat_ids": len(config.get("allowed_chat_ids", [])),
         "allowed_user_ids": len(config.get("allowed_user_ids", [])),
+        "record_all_joined_chats": bool(config.get("record_all_joined_chats", True)),
+        "respond_in_group_only_when_mentioned": bool(config.get("respond_in_group_only_when_mentioned", True)),
+        "ignore_app_senders": bool(config.get("ignore_app_senders", True)),
+        "log_received_events": bool(config.get("log_received_events", True)),
     }
 
 
 def run(config_path: Path, app_file: Path, encrypt_file: Path) -> None:
     if lark is None:
         raise SystemExit("Missing lark_oapi. Install with: python3 -m pip install lark-oapi")
-    if not config_path.exists():
-        write_json(config_path, default_config())
-    config = read_json(config_path, default_config())
+    config = ensure_config_file(config_path)
     credentials = read_lark_credentials(app_file, encrypt_file)
     missing = [key for key in ("app_id", "app_secret") if not credentials.get(key)]
     if missing:
@@ -773,12 +868,21 @@ def run(config_path: Path, app_file: Path, encrypt_file: Path) -> None:
     client = lark_client(config, credentials)
 
     def on_message(event: P2ImMessageReceiveV1) -> None:
+        config_for_error = load_config(config_path)
+        message = getattr(getattr(event, "event", None), "message", None)
+        text = ""
+        sender = {}
+        if message is not None:
+            text = message_text(message)
+            sender = sender_ids(event.event.sender)
         try:
             handle_message(client, event, config_path)
         except Exception as exc:
             try:
-                message_id = str(getattr(event.event.message, "message_id", "") or "")
-                if message_id:
+                if message is not None:
+                    audit_event(message, sender, text, config_for_error, "error", f"{type(exc).__name__}: {exc}")
+                message_id = str(getattr(message, "message_id", "") or "") if message is not None else ""
+                if message_id and message is not None and should_reply(message, text, config_for_error):
                     send_text(client, message_id, f"处理失败：{type(exc).__name__}: {redact_secrets(str(exc))}")
             finally:
                 print(f"lark message handling failed: {type(exc).__name__}: {redact_secrets(str(exc))}", flush=True)
@@ -807,10 +911,18 @@ def main() -> None:
     parser.add_argument("--app-secret-file", type=Path, default=DEFAULT_APP_SECRET_FILE)
     parser.add_argument("--encrypt-file", type=Path, default=DEFAULT_ENCRYPT_FILE)
     parser.add_argument("--check", action="store_true", help="Validate local config and credential presence without connecting.")
+    parser.add_argument("--check-online", action="store_true", help="Validate Lark OpenAPI token and bot capability without starting the WebSocket loop.")
     args = parser.parse_args()
 
     if args.check:
         print(json.dumps(check_setup(args.config, args.app_secret_file, args.encrypt_file), ensure_ascii=False, indent=2))
+        return
+    if args.check_online:
+        config = ensure_config_file(args.config)
+        credentials = read_lark_credentials(args.app_secret_file, args.encrypt_file)
+        result = check_setup(args.config, args.app_secret_file, args.encrypt_file)
+        result.update(online_check(config, credentials))
+        print(json.dumps(result, ensure_ascii=False, indent=2))
         return
     while True:
         try:
